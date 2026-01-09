@@ -14,47 +14,71 @@ import NutMEG as nm
 ssl._create_default_https_context = ssl._create_unverified_context
 
 
-def load_matano_data(url):
+def load_matano_data(url, interpolate=True):
     """
-    Load Lake Matano data from Google Sheets in long format and 
-    interpolate to a common depth grid.
+    Load Lake Matano data from Google Sheets in long format.
 
-    This function reads nutrient concentration profiles and interpolates
-    them to a regular depth grid for use in the productivity model.
+    Parameters
+    ----------
+    url : str
+        URL of the CSV containing parameter, depth_m, and value columns.
+    interpolate : bool, optional
+        If True (default), interpolate data to a 1 m grid from 0 to 550 m.
+        If False, return only measured depths without interpolation.
 
     Returns
     -------
-    depths : np.array
-        Depth grid (m)
     data : dict
-        Dictionary of interpolated values for each parameter
+        Dictionary containing 'depth' and parameter arrays.
     """
     df_long = pd.read_csv(url)
-
-    # Create depth grid (every 1 meter from 0 to 550)
-    depths = np.arange(0, 551, 1)
-
-    # Dictionary to store interpolated data
-    data = {'depth': depths}
 
     # Parameters we want to extract
     params = ['NH4_umol_L', 'NO3_umol_L']
 
-    for param in params:
-        param_data = df_long[df_long['parameter'] == param].copy()
-        param_data = param_data.sort_values('depth_m')
+    if interpolate:
+        # Create depth grid (every 1 meter from 0 to 550)
+        depths = np.arange(0, 551, 1)
 
-        if len(param_data) > 0:
-            interp_values = np.interp(
-                depths,
-                param_data['depth_m'],
-                param_data['value'],
-                left=np.nan,
-                right=np.nan
-            )
-            data[param] = interp_values
-        else:
-            data[param] = np.full(len(depths), np.nan)
+        # Dictionary to store interpolated data
+        data = {'depth': depths}
+
+        for param in params:
+            param_data = df_long[df_long['parameter'] == param].copy()
+            param_data = param_data.sort_values('depth_m')
+
+            if len(param_data) > 0:
+                interp_values = np.interp(
+                    depths,
+                    param_data['depth_m'],
+                    param_data['value'],
+                    left=np.nan,
+                    right=np.nan
+                )
+                data[param] = interp_values
+            else:
+                data[param] = np.full(len(depths), np.nan)
+
+        return data
+
+    # Non-interpolated: return only measured depths for NO3 or NH4
+    df_filtered = df_long[df_long['parameter'].isin(params)].copy()
+    df_filtered = df_filtered.dropna(subset=['depth_m', 'value'])
+
+    if df_filtered.empty:
+        empty_arr = np.array([])
+        return {'depth': empty_arr, **{p: empty_arr for p in params}}
+
+    depths = np.sort(df_filtered['depth_m'].unique())
+    data = {'depth': depths}
+
+    for param in params:
+        param_series = (
+            df_filtered[df_filtered['parameter'] == param]
+            .groupby('depth_m')['value']
+            .mean()
+        )
+        data[param] = param_series.reindex(depths).to_numpy()
 
     return data
 
@@ -292,10 +316,14 @@ def main():
     url = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTgMvmTJ9LGCeC6vAJyHyh-X6fL3AHzKY9R0PuJLdTMGTE1qq7ZChWN2VL6qrtD8ib1r5l2UQyj6phf/pub?gid=1636861519&single=true&output=csv'
     
     print("Loading Lake Matano data...")
-    matano_data = load_matano_data(url)
+    matano_data = load_matano_data(url, interpolate=True)
+    matano_raw = load_matano_data(url, interpolate=False)
     depths = matano_data['depth']
     NH4_data = matano_data['NH4_umol_L']  # NH4 in μmol/L
     NO3_data = matano_data['NO3_umol_L']  # NO3 in μmol/L
+    raw_depths = matano_raw['depth']
+    raw_NH4 = matano_raw['NH4_umol_L']
+    raw_NO3 = matano_raw['NO3_umol_L']
     
     # Convert from μmol/L to mol/kg (1 μmol/L = 1e-6 mol/kg for water)
     NH4_molkg = NH4_data * 1e-6
@@ -370,8 +398,8 @@ def main():
     axes[0].grid(True, alpha=0.3)
 
     # Plot 2: NO3- and NH4+ concentrations
-    axes[1].plot(NO3_data * 100, depths, label='NO₃⁻ (μmol/L) ×100', linewidth=2, color='red')
-    axes[1].plot(NH4_data, depths, label='NH₄⁺ (μmol/L)', linewidth=2, color='purple')
+    axes[1].scatter(raw_NO3 * 100, raw_depths, label='NO₃⁻ (μmol/L) ×100', color='red', s=30, marker='D')
+    axes[1].scatter(raw_NH4, raw_depths, label='NH₄⁺ (μmol/L)', color='purple', s=30, marker='X')
     axes[1].invert_yaxis()
     axes[1].set_ylim(200, 0)
     axes[1].set_title('Nitrogen Compounds', fontsize=13, fontweight='bold')

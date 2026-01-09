@@ -1,0 +1,13 @@
+# macOS
+.DS_Store
+
+# Logs
+*.log
+
+# Generated plots
+*.png
+
+# Python
+__pycache__/
+*.pyc
+
