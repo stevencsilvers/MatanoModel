@@ -33,9 +33,20 @@ def load_matano_data(url, interpolate=True):
     """
     df_long = pd.read_csv(url)
 
-    # Parameters we want to extract
-    params = ['NH4_umol_L', 'NO3_umol_L']
+    # # TEST
+    df_long.loc[(df_long['parameter'] == 'NO3_umol_L') & (df_long['depth_m'] == 9), 'value'] = 0.0
+    df_long.loc[(df_long['parameter'] == 'NO3_umol_L') & (df_long['depth_m'] == 20), 'value'] = 0.0
+    df_long.loc[(df_long['parameter'] == 'NO3_umol_L') & (df_long['depth_m'] == 25), 'value'] = 0.0
+    df_long.loc[(df_long['parameter'] == 'NO3_umol_L') & (df_long['depth_m'] == 40), 'value'] = 0.0
+    # TEST
 
+    # Filter to only include rows where year is NaN or 2005
+    df_long = df_long[(df_long['year'].isna()) | (df_long['year'] == 2005)]
+
+    # Parameters we want to extract
+    params = ['NH4_umol_L', 'NO3_umol_L', 'P_umol_L']
+
+    # Interpolated: return interpolated concentrations for each chemical species
     if interpolate:
         # Create depth grid (every 1 meter from 0 to 550)
         depths = np.arange(0, 551, 1)
@@ -61,7 +72,7 @@ def load_matano_data(url, interpolate=True):
 
         return data
 
-    # Non-interpolated: return only measured depths for NO3 or NH4
+    # Non-interpolated: return only measured depths for each chemical species
     df_filtered = df_long[df_long['parameter'].isin(params)].copy()
     df_filtered = df_filtered.dropna(subset=['depth_m', 'value'])
 
@@ -192,9 +203,10 @@ def Platt_tanh(resp, alpha, Pmax, I):
     return np.tanh(alpha * I / Pmax)
 
 
-def Monod_nitrogen(resp, NO3, NH4, R_n, R_a):
+def Monod_n_p(resp, NO3, NH4, P, R_n, R_a, k_popnf):
     """
-    Forcing function for growth inhibition based on bioavailable nitrogen.
+    Forcing function for growth inhibition based on bioavailable nitrogen and phosphorus.
+    Based on Matano paper page 40, equation 9.
 
     This follows the Matano model formulation:
         beta_t = beta_NO3 + beta_a (NH4)
@@ -212,12 +224,20 @@ def Monod_nitrogen(resp, NO3, NH4, R_n, R_a):
     R_a : float
         Monod half-saturation constant for NH4 uptake
     """
+    return min(Monod_nitrogen(NO3, NH4, R_n, R_a), Monod_phosphorus(P, k_popnf))
+
+
+def Monod_nitrogen(NO3, NH4, R_n, R_a):
     beta_NO3 = NO3 / (R_n + NO3)
     beta_a = NH4 / (R_a + NH4)
     return beta_NO3 + beta_a
 
 
-def get_phototroph(R, rxn, Pm, I, alpha, NO3, NH4, R_n, R_a, mmr, mgr, num=1e6, name='Phototroph'):
+def Monod_phosphorus(P, k_popnf):
+    return P / (k_popnf + P)
+
+
+def get_phototroph(R, rxn, Pm, I, alpha, NO3, NH4, P, R_n, R_a, k_popnf, mmr, mgr, num=1e6, name='Phototroph'):
     """
     Create a NutMEG.horde object representing a phototroph.
 
@@ -283,14 +303,16 @@ def get_phototroph(R, rxn, Pm, I, alpha, NO3, NH4, R_n, R_a, mmr, mgr, num=1e6, 
             ## depending on shared environmental attributes.
             ##
             'CHNOPS_forcing_parameters': {
-                'Monod': (Monod_nitrogen, ['NO3', 'NH4', 'R_n', 'R_a']),
+                'Monod': (Monod_n_p, ['NO3', 'NH4', 'P', 'R_n', 'R_a', 'k_popnf']),
                 'Platt': (Platt_tanh, ['alpha', 'Pmax', 'I'])
             },
             'CHNOPS_F_attrs': {
                 'NO3': NO3,
                 'NH4': NH4,
+                'P': P,
                 'R_n': R_n,
                 'R_a': R_a,
+                'k_popnf': k_popnf,
                 'alpha': alpha,
                 'I': I,
                 'Pmax': Pm,
@@ -321,13 +343,16 @@ def main():
     depths = matano_data['depth']
     NH4_data = matano_data['NH4_umol_L']  # NH4 in μmol/L
     NO3_data = matano_data['NO3_umol_L']  # NO3 in μmol/L
+    P_data = matano_data['P_umol_L']      # P in μmol/L
     raw_depths = matano_raw['depth']
     raw_NH4 = matano_raw['NH4_umol_L']
     raw_NO3 = matano_raw['NO3_umol_L']
-    
+    raw_P = matano_raw['P_umol_L']
+
     # Convert from μmol/L to mol/kg (1 μmol/L = 1e-6 mol/kg for water)
     NH4_molkg = NH4_data * 1e-6
     NO3_molkg = NO3_data * 1e-6
+    P_molkg = P_data * 1e-6
     
     # Set up reactor
     R = nm.reactor('Matano_reactor', workoutID=False, pH=7.0)
@@ -352,6 +377,7 @@ def main():
     I_0 = 283  # Surface irradiance (W/m²) 1300 umol Eins m^-2
     R_n = 2.5e-6  # Half-saturation constant for NO3 (mol/kg)
     R_a = 2.5e-6  # Half-saturation constant for NH4 (mol/kg)
+    k_popnf = 1e-8 # Half-saturation constant for P (mol/kg)
     k = -0.06 # PAR extinction coefficient (m^-1)
 
     # Calculate irradiance at each depth
@@ -360,16 +386,18 @@ def main():
     # Calculate array of irradiance forcing factors with depth
     F_E = Platt_tanh(None, alpha, Pm, Idepths)
 
-    # Calculate array of nitrogen forcing factors with depth
-    # Calculate array of nitrogen forcing factors with depth
-    F_N = Monod_nitrogen(None, np.nan_to_num(NO3_molkg, nan=0.0), np.nan_to_num(NH4_molkg, nan=0.0), R_n, R_a)
+    # Calculate array of nitrogen forcing factors with depth (just for graphing)
+    F_N = Monod_nitrogen(np.nan_to_num(NO3_molkg, nan=0.0), np.nan_to_num(NH4_molkg, nan=0.0), R_n, R_a)
     F_N[np.isnan(NO3_molkg) & np.isnan(NH4_molkg)] = np.nan  # hide depths with no N data at all
+
+    # Calculate array of phosphorus forcing factors with depth (just for graphing)
+    F_P = Monod_phosphorus(P_molkg, k_popnf)
     
     # Calculate phototroph growth rates (where we have nitrogen data)
     print("Calculating growth rates...")
     Prod = np.full(len(depths), np.nan)
     
-    for i, (depth, NO3, NH4, I) in enumerate(zip(depths, NO3_molkg, NH4_molkg, Idepths)):
+    for i, (depth, NO3, NH4, P, I) in enumerate(zip(depths, NO3_molkg, NH4_molkg, P_molkg, Idepths)):
         # Only calculate if we have at least one nitrogen source
         if not (np.isnan(NO3) and np.isnan(NH4)):
             # Replace NaN with 0 for calculation
@@ -377,7 +405,7 @@ def main():
             NH4_calc = 0 if np.isnan(NH4) else NH4
             
             try:
-                phototroph = get_phototroph(R, rxn, Pm, I, alpha, NO3_calc, NH4_calc, R_n, R_a, mmr, mgr)
+                phototroph = get_phototroph(R, rxn, Pm, I, alpha, NO3_calc, NH4_calc, P, R_n, R_a, k_popnf, mmr, mgr)
                 Prod[i] = get_phototroph_rate(phototroph)
 
             except:
@@ -386,36 +414,41 @@ def main():
     # Plot results
     fig, axes = plt.subplots(1, 3, figsize=(16, 8))
     
-    # Plot 1: Forcing factors (light and individual nitrogen)
+    # Plot 1: Forcing factors (light, nitrogen, phosphorus)
     axes[0].plot(F_E, depths, label='F_I (irradiance)', linewidth=2, color='orange')
     axes[0].plot(F_N, depths, label='β_t (total nitrogen availability)', linewidth=2, color='blue')
+    axes[0].plot(F_P, depths, label='F_P (total phosphorus availability)', linewidth=2, color='green')
     axes[0].invert_yaxis()
+    axes[0].set_xlim(0, 1.75)
     axes[0].set_ylim(200, 0)
     axes[0].set_xlabel('Forcing Factor', fontsize=12)
     axes[0].set_ylabel('Depth (m)', fontsize=12)
     axes[0].set_title('Individual Forcing Factors', fontsize=13, fontweight='bold')
-    axes[0].legend()
+    axes[0].legend(loc='lower right')
     axes[0].grid(True, alpha=0.3)
 
-    # Plot 2: NO3- and NH4+ concentrations
+    # Plot 2: NO3-, NH4+, and P concentrations
     axes[1].scatter(raw_NO3 * 100, raw_depths, label='NO₃⁻ (μmol/L) ×100', color='red', s=30, marker='D')
     axes[1].scatter(raw_NH4, raw_depths, label='NH₄⁺ (μmol/L)', color='purple', s=30, marker='X')
+    axes[1].scatter(raw_P * 100, raw_depths, label='P (μmol/L) ×100', color='blue', s=30, marker='+')
     axes[1].invert_yaxis()
+    axes[1].set_xlim(0, 650)
     axes[1].set_ylim(200, 0)
-    axes[1].set_title('Nitrogen Compounds', fontsize=13, fontweight='bold')
+    axes[1].set_title('Nitrogen and Phosphorus Compounds', fontsize=13, fontweight='bold')
     axes[1].set_xlabel('Concentration (μmol/L)', fontsize=12)
     axes[1].set_ylabel('Depth (m)', fontsize=12)
-    axes[1].legend()
+    axes[1].legend(loc='upper right')
     axes[1].grid(True, alpha=0.3)
 
-    # Plot 2: Growth rate
+    # Plot 3: Growth rate
     axes[2].plot(Prod*1e6, depths, color='green', linewidth=2, label='Growth rate')
     axes[2].invert_yaxis()
+    # axes[2].set_xlim(0,)
     axes[2].set_ylim(200, 0)
     axes[2].set_xlabel('Growth Rate (×10⁶ s⁻¹)', fontsize=12)
     axes[2].set_ylabel('Depth (m)', fontsize=12)
     axes[2].set_title('Phototroph Growth Rate', fontsize=13, fontweight='bold')
-    axes[2].legend()
+    axes[2].legend(loc='lower right')
     axes[2].grid(True, alpha=0.3)
     
     fig.suptitle('Primary Production Model - Lake Matano (NO₃⁻ + NH₄⁺)', 
@@ -424,9 +457,14 @@ def main():
 
     filename = get_incremented_filename('matano_phototroph_growth', '.png')
 
-    plt.savefig(filename, dpi=300, bbox_inches='tight')
-    
-    print(f"\nPlot saved as '{filename}'\n")
+
+    save = False
+
+    if save:
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        print(f"\nPlot saved as '{filename}'\n")
+    else:
+        plt.show()
 
 if __name__ == "__main__":
     main()
