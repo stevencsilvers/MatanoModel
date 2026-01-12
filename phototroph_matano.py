@@ -393,10 +393,10 @@ def main():
     mgr = Pm * CChl_to_Cbm / 3600  # growth rate in /s
     
     # Parameters from Matano model paper
-    I_0 = 283  # Surface irradiance (W/m²) 1300 umol Eins m^-2
+    I_0 = 1300  # Surface irradiance umol photons m^-2
     R_n = 2.5e-6  # Half-saturation constant for NO3 (mol/kg)
     R_a = 2.5e-6  # Half-saturation constant for NH4 (mol/kg)
-    k_popnf = 1e-8 # Half-saturation constant for P (mol/kg)
+    k_popnf = 1e-8 # Half-saturation constant for P (mol/kg) (originally 5e-8, 1e-8 produces better results)
     k = -0.06 # PAR extinction coefficient (m^-1)
 
     # Calculate irradiance at each depth
