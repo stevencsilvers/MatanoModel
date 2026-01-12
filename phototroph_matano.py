@@ -33,18 +33,13 @@ def load_matano_data(url, interpolate=True):
     """
     df_long = pd.read_csv(url)
 
-    # # TEST
-    df_long.loc[(df_long['parameter'] == 'NO3_umol_L') & (df_long['depth_m'] == 9), 'value'] = 0.0
-    df_long.loc[(df_long['parameter'] == 'NO3_umol_L') & (df_long['depth_m'] == 20), 'value'] = 0.0
-    df_long.loc[(df_long['parameter'] == 'NO3_umol_L') & (df_long['depth_m'] == 25), 'value'] = 0.0
-    df_long.loc[(df_long['parameter'] == 'NO3_umol_L') & (df_long['depth_m'] == 40), 'value'] = 0.0
-    # TEST
-
-    # Filter to only include rows where year is NaN or 2005
-    df_long = df_long[(df_long['year'].isna()) | (df_long['year'] == 2005)]
-
-    # Parameters we want to extract
-    params = ['NH4_umol_L', 'NO3_umol_L', 'P_umol_L']
+    # Parameters we want to extract, mapped to their specific years
+    # Empty string '' means no year value (NaN in the 'year' column)
+    params = {
+        'NH4_umol_L': '',
+        'NO3_umol_L': 2010,
+        'P_umol_L': 2005
+    }
 
     # Interpolated: return interpolated concentrations for each chemical species
     if interpolate:
@@ -54,8 +49,17 @@ def load_matano_data(url, interpolate=True):
         # Dictionary to store interpolated data
         data = {'depth': depths}
 
-        for param in params:
+        for param, year in params.items():
+            # Filter data for this parameter and its specific year
             param_data = df_long[df_long['parameter'] == param].copy()
+            
+            if year == '':
+                # Empty string means look for rows where year is NaN
+                param_data = param_data[param_data['year'].isna()]
+            else:
+                # Filter for the specific year
+                param_data = param_data[param_data['year'] == year]
+            
             param_data = param_data.sort_values('depth_m')
 
             if len(param_data) > 0:
@@ -73,17 +77,31 @@ def load_matano_data(url, interpolate=True):
         return data
 
     # Non-interpolated: return only measured depths for each chemical species
-    df_filtered = df_long[df_long['parameter'].isin(params)].copy()
+    # Filter data for each parameter with its specific year
+    df_filtered_list = []
+    for param, year in params.items():
+        param_data = df_long[df_long['parameter'] == param].copy()
+        
+        if year == '':
+            # Empty string means look for rows where year is NaN
+            param_data = param_data[param_data['year'].isna()]
+        else:
+            # Filter for the specific year
+            param_data = param_data[param_data['year'] == year]
+        
+        df_filtered_list.append(param_data)
+    
+    df_filtered = pd.concat(df_filtered_list, ignore_index=True) if df_filtered_list else pd.DataFrame()
     df_filtered = df_filtered.dropna(subset=['depth_m', 'value'])
 
     if df_filtered.empty:
         empty_arr = np.array([])
-        return {'depth': empty_arr, **{p: empty_arr for p in params}}
+        return {'depth': empty_arr, **{p: empty_arr for p in params.keys()}}
 
     depths = np.sort(df_filtered['depth_m'].unique())
     data = {'depth': depths}
 
-    for param in params:
+    for param in params.keys():
         param_series = (
             df_filtered[df_filtered['parameter'] == param]
             .groupby('depth_m')['value']
@@ -185,7 +203,7 @@ def Platt_tanh(resp, alpha, Pmax, I):
 
     Parameters
     ----------
-    resp : Nonetype,
+    resp : NoneType,
         Required arg for forcing_functions when they depend on properties
         accessible by the host organism's respiration (e.g., a local substrate
         concentration). This function does not have such a dependence, so
@@ -198,7 +216,8 @@ def Platt_tanh(resp, alpha, Pmax, I):
         Platt fitting parameter which defines the maximum productivity in
         mg C / mg Chl a / h (or commensurate with alpha)
     I : float
-        Irradiance in W / m2 (or commensurate with alpha)
+        Irradiance (e.g., µmol photons m⁻² s⁻¹ or W m⁻²),
+        must be consistent with the units used for alpha.
     """
     return np.tanh(alpha * I / Pmax)
 
@@ -419,7 +438,7 @@ def main():
     axes[0].plot(F_N, depths, label='β_t (total nitrogen availability)', linewidth=2, color='blue')
     axes[0].plot(F_P, depths, label='F_P (total phosphorus availability)', linewidth=2, color='green')
     axes[0].invert_yaxis()
-    axes[0].set_xlim(0, 1.75)
+    axes[0].set_xlim(0, 1.05)
     axes[0].set_ylim(200, 0)
     axes[0].set_xlabel('Forcing Factor', fontsize=12)
     axes[0].set_ylabel('Depth (m)', fontsize=12)
@@ -434,14 +453,14 @@ def main():
     axes[1].invert_yaxis()
     axes[1].set_xlim(0, 650)
     axes[1].set_ylim(200, 0)
-    axes[1].set_title('Nitrogen and Phosphorus Compounds', fontsize=13, fontweight='bold')
+    axes[1].set_title('Chemical Species Concentrations', fontsize=13, fontweight='bold')
     axes[1].set_xlabel('Concentration (μmol/L)', fontsize=12)
     axes[1].set_ylabel('Depth (m)', fontsize=12)
     axes[1].legend(loc='upper right')
     axes[1].grid(True, alpha=0.3)
 
     # Plot 3: Growth rate
-    axes[2].plot(Prod*1e6, depths, color='green', linewidth=2, label='Growth rate')
+    axes[2].plot(Prod*1e6, depths, color='red', linewidth=2, label='Growth rate')
     axes[2].invert_yaxis()
     # axes[2].set_xlim(0,)
     axes[2].set_ylim(200, 0)
@@ -451,7 +470,7 @@ def main():
     axes[2].legend(loc='lower right')
     axes[2].grid(True, alpha=0.3)
     
-    fig.suptitle('Primary Production Model - Lake Matano (NO₃⁻ + NH₄⁺)', 
+    fig.suptitle('Predicted Primary Production in Lake Matano', 
                  fontsize=15, fontweight='bold')
     plt.tight_layout()
 
