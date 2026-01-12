@@ -2,6 +2,7 @@ import os, math, sys
 sys.path.append(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(os.path.dirname(__file__)+'/../NutMEG')
 
+import argparse
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -14,7 +15,7 @@ import NutMEG as nm
 ssl._create_default_https_context = ssl._create_unverified_context
 
 
-def load_matano_data(url, interpolate=True):
+def load_matano_data(url, interpolate=False):
     """
     Load Lake Matano data from Google Sheets in long format.
 
@@ -33,12 +34,17 @@ def load_matano_data(url, interpolate=True):
     """
     df_long = pd.read_csv(url)
 
+    # Change first two NO3 data points
+    # df_long.loc[(df_long['parameter'] == 'NO3_umol_L') & (df_long['depth_m'] == 9), 'value'] = 0.0
+    # df_long.loc[(df_long['parameter'] == 'NO3_umol_L') & (df_long['depth_m'] == 20), 'value'] = 0.0
+
     # Parameters we want to extract, mapped to their specific years
     # Empty string '' means no year value (NaN in the 'year' column)
     params = {
         'NH4_umol_L': '',
         'NO3_umol_L': 2010,
-        'P_umol_L': 2005
+        'P_umol_L': 2005,
+        'par': 2007
     }
 
     # Interpolated: return interpolated concentrations for each chemical species
@@ -363,10 +369,12 @@ def main():
     NH4_data = matano_data['NH4_umol_L']  # NH4 in μmol/L
     NO3_data = matano_data['NO3_umol_L']  # NO3 in μmol/L
     P_data = matano_data['P_umol_L']      # P in μmol/L
+    par_data = matano_data['par']         # PAR in μmol photons m⁻² s⁻¹
     raw_depths = matano_raw['depth']
     raw_NH4 = matano_raw['NH4_umol_L']
     raw_NO3 = matano_raw['NO3_umol_L']
     raw_P = matano_raw['P_umol_L']
+    raw_par = matano_raw['par']
 
     # Convert from μmol/L to mol/kg (1 μmol/L = 1e-6 mol/kg for water)
     NH4_molkg = NH4_data * 1e-6
@@ -382,7 +390,7 @@ def main():
     # Pm and alpha are platt model properties. The ones identified below are
     # global averages based on the dataset in Bouman et al., (2018).
     Pm = 3.1145  # mg C / mg Chl /h
-    alpha = 0.04278
+    alpha = 0.04278  # uses units containing μmol photons m⁻² s⁻¹
     
     # ratio between g of Chl a and g of cells.
     CChl_to_Cbm = 0.01 # 0.003 to 0.055 (Middelburg 2019)
@@ -403,7 +411,7 @@ def main():
     Idepths = Idepth(I_0, depths, k)
     
     # Calculate array of irradiance forcing factors with depth
-    F_E = Platt_tanh(None, alpha, Pm, Idepths)
+    F_E = Platt_tanh(None, alpha, Pm, par_data)
 
     # Calculate array of nitrogen forcing factors with depth (just for graphing)
     F_N = Monod_nitrogen(np.nan_to_num(NO3_molkg, nan=0.0), np.nan_to_num(NH4_molkg, nan=0.0), R_n, R_a)
@@ -416,7 +424,7 @@ def main():
     print("Calculating growth rates...")
     Prod = np.full(len(depths), np.nan)
     
-    for i, (depth, NO3, NH4, P, I) in enumerate(zip(depths, NO3_molkg, NH4_molkg, P_molkg, Idepths)):
+    for i, (depth, NO3, NH4, P, I) in enumerate(zip(depths, NO3_molkg, NH4_molkg, P_molkg, par_data)):
         # Only calculate if we have at least one nitrogen source
         if not (np.isnan(NO3) and np.isnan(NH4)):
             # Replace NaN with 0 for calculation
@@ -431,22 +439,19 @@ def main():
                 Prod[i] = np.nan
     
     # Plot results
-    fig, axes = plt.subplots(1, 3, figsize=(16, 8))
+    fig, axes = plt.subplots(1, 4, figsize=(18, 6))
     
-    # Plot 1: Forcing factors (light, nitrogen, phosphorus)
-    axes[0].plot(F_E, depths, label='F_I (irradiance)', linewidth=2, color='orange')
-    axes[0].plot(F_N, depths, label='β_t (total nitrogen availability)', linewidth=2, color='blue')
-    axes[0].plot(F_P, depths, label='F_P (total phosphorus availability)', linewidth=2, color='green')
+    # Plot 1: PAR vs depth
+    axes[0].scatter(raw_par, raw_depths, color='goldenrod', s=40, marker='.')
     axes[0].invert_yaxis()
-    axes[0].set_xlim(0, 1.05)
+    axes[0].set_xscale('log')
     axes[0].set_ylim(200, 0)
-    axes[0].set_xlabel('Forcing Factor', fontsize=12)
-    axes[0].set_ylabel('Depth (m)', fontsize=12)
-    axes[0].set_title('Individual Forcing Factors', fontsize=13, fontweight='bold')
-    axes[0].legend(loc='lower right')
+    axes[0].set_xlabel('PAR (μmol photons m⁻² s⁻¹)', fontsize=12)
+    axes[0].set_ylabel('Depth (m)', fontsize=10)
+    axes[0].set_title('Light Extinction', fontsize=13, fontweight='bold')
     axes[0].grid(True, alpha=0.3)
 
-    # Plot 2: NO3-, NH4+, and P concentrations
+    # Plot 2: Chemical species concentrations
     axes[1].scatter(raw_NO3 * 100, raw_depths, label='NO₃⁻ (μmol/L) ×100', color='red', s=30, marker='D')
     axes[1].scatter(raw_NH4, raw_depths, label='NH₄⁺ (μmol/L)', color='purple', s=30, marker='X')
     axes[1].scatter(raw_P * 100, raw_depths, label='P (μmol/L) ×100', color='blue', s=30, marker='+')
@@ -455,20 +460,33 @@ def main():
     axes[1].set_ylim(200, 0)
     axes[1].set_title('Chemical Species Concentrations', fontsize=13, fontweight='bold')
     axes[1].set_xlabel('Concentration (μmol/L)', fontsize=12)
-    axes[1].set_ylabel('Depth (m)', fontsize=12)
+    axes[1].set_ylabel('Depth (m)', fontsize=10)
     axes[1].legend(loc='upper right')
     axes[1].grid(True, alpha=0.3)
-
-    # Plot 3: Growth rate
-    axes[2].plot(Prod*1e6, depths, color='red', linewidth=2, label='Growth rate')
+    
+    # Plot 3: Forcing factors (light, nitrogen, phosphorus)
+    axes[2].plot(F_E, depths, label='F_I (irradiance)', linewidth=2, color='orange')
+    axes[2].plot(F_N, depths, label='β_t (total nitrogen availability)', linewidth=2, color='blue')
+    axes[2].plot(F_P, depths, label='F_P (total phosphorus availability)', linewidth=2, color='green')
     axes[2].invert_yaxis()
-    # axes[2].set_xlim(0,)
+    axes[2].set_xlim(0, 1.05)
     axes[2].set_ylim(200, 0)
-    axes[2].set_xlabel('Growth Rate (×10⁶ s⁻¹)', fontsize=12)
-    axes[2].set_ylabel('Depth (m)', fontsize=12)
-    axes[2].set_title('Phototroph Growth Rate', fontsize=13, fontweight='bold')
+    axes[2].set_xlabel('Forcing Factor', fontsize=12)
+    axes[2].set_ylabel('Depth (m)', fontsize=10)
+    axes[2].set_title('Individual Forcing Factors', fontsize=13, fontweight='bold')
     axes[2].legend(loc='lower right')
     axes[2].grid(True, alpha=0.3)
+
+    # Plot 4: Growth rate
+    axes[3].plot(Prod*1e6, depths, color='red', linewidth=2, label='Growth rate')
+    axes[3].invert_yaxis()
+    # axes[3].set_xlim(0,)
+    axes[3].set_ylim(200, 0)
+    axes[3].set_xlabel('Growth Rate (×10⁶ s⁻¹)', fontsize=12)
+    axes[3].set_ylabel('Depth (m)', fontsize=10)
+    axes[3].set_title('Phototroph Growth Rate', fontsize=13, fontweight='bold')
+    axes[3].legend(loc='lower right')
+    axes[3].grid(True, alpha=0.3)
     
     fig.suptitle('Predicted Primary Production in Lake Matano', 
                  fontsize=15, fontweight='bold')
@@ -477,9 +495,12 @@ def main():
     filename = get_incremented_filename('matano_phototroph_growth', '.png')
 
 
-    save = False
+    # Command line argument "--save" to save the plot instead of displaying it
+    parser = argparse.ArgumentParser(description='Generate Lake Matano phototroph growth plots')
+    parser.add_argument('--save', action='store_true', help='Save plot to file instead of displaying')
+    args = parser.parse_args()
 
-    if save:
+    if args.save:
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         print(f"\nPlot saved as '{filename}'\n")
     else:
