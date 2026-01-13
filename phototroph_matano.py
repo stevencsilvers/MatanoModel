@@ -24,8 +24,8 @@ def load_matano_data(url, interpolate=False):
     url : str
         URL of the CSV containing parameter, depth_m, and value columns.
     interpolate : bool, optional
-        If True (default), interpolate data to a 1 m grid from 0 to 550 m.
-        If False, return only measured depths without interpolation.
+        If True, interpolate data to a 1 m grid from 0 to 550 m.
+        If False, return data on 0-550 m grid with NaN for unmeasured depths.
 
     Returns
     -------
@@ -53,45 +53,12 @@ def load_matano_data(url, interpolate=False):
         'O2': 2004
     }
 
-    # Interpolated: return interpolated concentrations for each chemical species
-    if interpolate:
-        # Create depth grid (every 1 meter from 0 to 550)
-        depths = np.arange(0, 551, 1)
+    # Create depth grid (every 1 meter from 0 to 550)
+    depths = np.arange(0, 551, 1)
+    data = {'depth': depths}
 
-        # Dictionary to store interpolated data
-        data = {'depth': depths}
-
-        for param, year in params.items():
-            # Filter data for this parameter and its specific year
-            param_data = df_long[df_long['parameter'] == param].copy()
-            
-            if year == '':
-                # Empty string means look for rows where year is NaN
-                param_data = param_data[param_data['year'].isna()]
-            else:
-                # Filter for the specific year
-                param_data = param_data[param_data['year'] == year]
-            
-            param_data = param_data.sort_values('depth_m')
-
-            if len(param_data) > 0:
-                interp_values = np.interp(
-                    depths,
-                    param_data['depth_m'],
-                    param_data['value'],
-                    left=np.nan,
-                    right=np.nan
-                )
-                data[param] = interp_values
-            else:
-                data[param] = np.full(len(depths), np.nan)
-
-        return data
-
-    # Non-interpolated: return only measured depths for each chemical species
-    # Filter data for each parameter with its specific year
-    df_filtered_list = []
     for param, year in params.items():
+        # Filter data for this parameter and its specific year
         param_data = df_long[df_long['parameter'] == param].copy()
         
         if year == '':
@@ -101,25 +68,29 @@ def load_matano_data(url, interpolate=False):
             # Filter for the specific year
             param_data = param_data[param_data['year'] == year]
         
-        df_filtered_list.append(param_data)
-    
-    df_filtered = pd.concat(df_filtered_list, ignore_index=True) if df_filtered_list else pd.DataFrame()
-    df_filtered = df_filtered.dropna(subset=['depth_m', 'value'])
+        param_data = param_data.sort_values('depth_m')
 
-    if df_filtered.empty:
-        empty_arr = np.array([])
-        return {'depth': empty_arr, **{p: empty_arr for p in params.keys()}}
-
-    depths = np.sort(df_filtered['depth_m'].unique())
-    data = {'depth': depths}
-
-    for param in params.keys():
-        param_series = (
-            df_filtered[df_filtered['parameter'] == param]
-            .groupby('depth_m')['value']
-            .mean()
-        )
-        data[param] = param_series.reindex(depths).to_numpy()
+        if len(param_data) > 0:
+            if interpolate:
+                # Interpolate values to fill gaps
+                values = np.interp(
+                    depths,
+                    param_data['depth_m'],
+                    param_data['value'],
+                    left=np.nan,
+                    right=np.nan
+                )
+            else:
+                # Place measured values on grid, leave NaN for unmeasured depths
+                values = np.full(len(depths), np.nan)
+                for _, row in param_data.iterrows():
+                    depth_idx = int(row['depth_m'])
+                    if 0 <= depth_idx < len(depths):
+                        values[depth_idx] = row['value']
+            
+            data[param] = values
+        else:
+            data[param] = np.full(len(depths), np.nan)
 
     return data
 
@@ -272,10 +243,9 @@ def inhibition(resp, species, a_inh, species_inh):
     return 0.5 * (1 - np.tanh(a_inh * (species - species_inh)))
 
 
-def get_phototroph(R, rxn, Pm, I, alpha, NO3, NH4, P, R_n, R_a, k_popnf, H2S, a_inh, H2S_inh, mmr, mgr, num=1e6, name='Phototroph'):
+def get_phototroph(R, rxn, Pm, I, alpha, NO3, NH4, P, R_no3, R_a, k_p_opnnf, H2S, a_inh, H2S_inh, mmr, mgr, num=1e6, name='Non-Nitrogen-Fixing Oxygenic Phototroph'):
     """
-    Create a NutMEG.horde object representing a phototroph.
-
+    Create a NutMEG.horde object representing a non-nitrogen-fixing oxygenic phototroph.
 
     Parameters
     ----------
@@ -338,7 +308,7 @@ def get_phototroph(R, rxn, Pm, I, alpha, NO3, NH4, P, R_n, R_a, k_popnf, H2S, a_
             ## depending on shared environmental attributes.
             ##
             'CHNOPS_forcing_parameters': {
-                'Phi': (Monod_n_p, ['NO3', 'NH4', 'P', 'R_n', 'R_a', 'k_popnf']),
+                'Phi': (Monod_n_p, ['NO3', 'NH4', 'P', 'R_no3', 'R_a', 'k_p_opnnf']),
                 'Platt': (Platt_tanh, ['alpha', 'Pmax', 'I']),
                 'Sulfur': (inhibition, ['H2S', 'a_inh', 'H2S_inh'])
             },
@@ -346,9 +316,9 @@ def get_phototroph(R, rxn, Pm, I, alpha, NO3, NH4, P, R_n, R_a, k_popnf, H2S, a_
                 'NO3': NO3,
                 'NH4': NH4,
                 'P': P,
-                'R_n': R_n,
+                'R_no3': R_no3,
                 'R_a': R_a,
-                'k_popnf': k_popnf,
+                'k_p_opnnf': k_p_opnnf,
                 'alpha': alpha,
                 'I': I,
                 'Pmax': Pm,
@@ -423,25 +393,27 @@ def main():
 
     # Sulfur inhibition forcing factor
     F_S = inhibition(None, np.nan_to_num(m_data['H2S'], nan=0.0), a_inh, H2S_inh)
+
+    print(len(m_data['NO3']))
     
     # Calculate phototroph growth rates (where we have nitrogen data)
     print("Calculating growth rates...")
-    Prod = np.full(len(m_data['depth']), np.nan)
+    prod_opnnf = np.full(len(m_data['depth']), np.nan)
     
-    for i, (depth, NO3, NH4, P, H2S, I, temp) in enumerate(zip(m_data['depth'], m_data['NO3'], m_data['NH4'], m_data['P'], m_data['H2S'], m_data['par'], m_data['temp'])):
+    for i in range(len(m_data['depth'])):
         # Only calculate if we have at least one nitrogen source
-        if not (np.isnan(NO3) and np.isnan(NH4)):
+        if not (np.isnan(m_data['NO3'][i]) and np.isnan(m_data['NH4'][i])):
             # Replace NaN with 0 for calculation
-            NO3_calc = 0 if np.isnan(NO3) else NO3
-            NH4_calc = 0 if np.isnan(NH4) else NH4
-            H2S_calc = 0 if np.isnan(H2S) else H2S
+            NO3_calc = 0 if np.isnan(m_data['NO3'][i]) else m_data['NO3'][i]
+            NH4_calc = 0 if np.isnan(m_data['NH4'][i]) else m_data['NH4'][i]
+            H2S_calc = 0 if np.isnan(m_data['H2S'][i]) else m_data['H2S'][i]
             
             try:
-                phototroph = get_phototroph(R, rxn, Pm, I, alpha, NO3_calc, NH4_calc, P, R_no3, R_a, k_p_opnnf, H2S_calc, a_inh, H2S_inh, mmr, mgr * temperature_modifier(temp, k_t))
-                Prod[i] = get_phototroph_rate(phototroph)
+                phototroph = get_phototroph(R, rxn, Pm, m_data['par'][i], alpha, NO3_calc, NH4_calc, m_data['P'][i], R_no3, R_a, k_p_opnnf, H2S_calc, a_inh, H2S_inh, mmr, mgr * temperature_modifier(m_data['temp'][i], k_t))
+                prod_opnnf[i] = get_phototroph_rate(phototroph)
 
             except:
-                Prod[i] = np.nan
+                prod_opnnf[i] = np.nan
     
     # Plot results
     fig, axes = plt.subplots(1, 4, figsize=(18, 6))
@@ -487,7 +459,7 @@ def main():
     axes[2].grid(True, alpha=0.3)
 
     # Plot 4: Growth rate
-    axes[3].plot(Prod*1e6, m_data['depth'], label='Non-Nitrogen Fixing Oxygenic Phototrophs', color='red', linewidth=2)
+    axes[3].plot(prod_opnnf*1e6, m_data['depth'], label='Non-Nitrogen Fixing Oxygenic Phototrophs', color='red', linewidth=2)
     axes[3].invert_yaxis()
     axes[3].set_ylim(200, 0)
     axes[3].set_xlabel('Growth Rate (×10⁶ s⁻¹)', fontsize=12)
