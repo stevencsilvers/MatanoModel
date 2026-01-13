@@ -34,11 +34,11 @@ def load_matano_data(url, interpolate=False):
     """
     df_long = pd.read_csv(url)
 
-    # TEST: Add row with H2S_umol_L at surface
-    # df_long = pd.concat([df_long, pd.DataFrame([{'parameter': 'H2S_umol_L', 'depth_m': 0, 'value': 0}])], ignore_index=True)
+    # TEST: Add row with H2S
+    df_long = pd.concat([df_long, pd.DataFrame([{'parameter': 'H2S', 'depth_m': 100, 'value': 0}])], ignore_index=True)
     # Change first two NO3 data points
-    # df_long.loc[(df_long['parameter'] == 'NO3_umol_L') & (df_long['depth_m'] == 9), 'value'] = 0.0
-    # df_long.loc[(df_long['parameter'] == 'NO3_umol_L') & (df_long['depth_m'] == 20), 'value'] = 0.0
+    df_long.loc[(df_long['parameter'] == 'NO3') & (df_long['depth_m'] == 9), 'value'] = 0.0
+    df_long.loc[(df_long['parameter'] == 'NO3') & (df_long['depth_m'] == 20), 'value'] = 0.0
 
     # Parameters we want to extract, mapped to their specific years
     # Empty string '' means no year value (NaN in the 'year' column)
@@ -48,7 +48,7 @@ def load_matano_data(url, interpolate=False):
         'P': 2005,
         'par': 2007,
         'temp': 2004,
-        'H2S': '',
+        'H2S': '', # TEMP change back to ''
         'SO4': '',
         'O2': 2004
     }
@@ -210,8 +210,11 @@ def Monod_n_p(resp, NO3, NH4, P, R_no3, R_a, k_p):
     R_a : float
         Monod half-saturation constant for NH4 uptake
     """
-    return min(Monod_nitrogen(NO3, NH4, R_no3, R_a), Monod_phosphorus(P, k_p))
+    return min(Monod_nitrogen(NO3, NH4, R_no3, R_a), Monod(None, P, k_p))
 
+
+def Monod_gsb(resp, NO3, NH4, P, H2S, R_no3, R_a, k_p, k_h2s):
+    return min(Monod_nitrogen(NO3, NH4, R_no3, R_a), Monod(None, P, k_p), Monod(None, H2S, k_h2s))
 
 def Monod_nitrogen(NO3, NH4, R_no3, R_a):
     beta_NO3 = NO3 / (R_no3 + NO3)
@@ -219,8 +222,8 @@ def Monod_nitrogen(NO3, NH4, R_no3, R_a):
     return beta_NO3 + beta_a
 
 
-def Monod_phosphorus(P, k_p):
-    return P / (k_p + P)
+def Monod(resp, A, k):
+    return A / (k + A)
 
 
 def temperature_modifier(t, k_t):
@@ -243,7 +246,7 @@ def inhibition(resp, species, a_inh, species_inh):
     return 0.5 * (1 - np.tanh(a_inh * (species - species_inh)))
 
 
-def get_phototroph(R, rxn, Pm, I, alpha, NO3, NH4, P, R_no3, R_a, k_p_opnnf, H2S, a_inh, H2S_inh, mmr, mgr, num=1e6, name='Non-Nitrogen-Fixing Oxygenic Phototroph'):
+def get_opnnf(R, rxn, Pm, I, alpha, NO3, NH4, P, R_no3, R_a, k_p_opnnf, H2S, a_inh, H2S_inh, mmr, mgr, num=1e6, name='Non-Nitrogen-Fixing Oxygenic Phototroph'):
     """
     Create a NutMEG.horde object representing a non-nitrogen-fixing oxygenic phototroph.
 
@@ -332,6 +335,51 @@ def get_phototroph(R, rxn, Pm, I, alpha, NO3, NH4, P, R_no3, R_a, k_p_opnnf, H2S
     return _phototroph
 
 
+def get_gsb(R, rxn, Pm, I, k_l_gsb, alpha, NO3, NH4, P, O2, R_no3, R_a, k_p_gsb, k_h2s_gsb, H2S, a_inh, O2_inh, mmr, mgr, num=1e6, name='Green Sulfur Bacterium'):
+    _phototroph = nm.horde(
+        name, R, rxn, num,
+        unit='cells',  # alternative units are not yet supported
+        workoutID=False,
+        E_synth=8e-10,
+        respiration_kwargs={
+            'rate_func': 'zeroth order',
+            'max_metabolic_rate': mmr,
+            'G_ATP': 'default',
+            'G_net_pathway': -1000000,  # set arbitrarily high
+            'G_C': 600000,              # J/mol of CO2 fixed
+            'rate_constant_env': mmr,
+        },
+        CHNOPS_kwargs={
+            'max_growth_rate': mgr,
+            'CHNOPS_forcing_parameters': {
+                'Phi': (Monod_gsb, ['NO3', 'NH4', 'P', 'H2S', 'R_no3', 'R_a', 'k_p_gsb', 'k_h2s_gsb']),
+                # 'Platt': (Platt_tanh, ['alpha', 'Pmax', 'I']),
+                'Light': (Monod, ['I', 'k_l_gsb']),
+                'Oxygen': (inhibition, ['O2', 'a_inh', 'O2_inh'])
+            }, 
+            'CHNOPS_F_attrs': {
+                'NO3': NO3,
+                'NH4': NH4,
+                'P': P,
+                'R_no3': R_no3,
+                'R_a': R_a,
+                'k_p_gsb': k_p_gsb,
+                'alpha': alpha,
+                'I': I,
+                'k_l_gsb': k_l_gsb,
+                'Pmax': Pm,
+                'H2S': H2S,
+                'k_h2s_gsb': k_h2s_gsb,
+                'a_inh': a_inh,
+                'O2': O2,
+                'O2_inh': O2_inh
+            }
+        }
+    )
+
+    return _phototroph
+
+
 def get_phototroph_rate(_phototroph, stepsize=600):
     """
     Returns growth rate of a horde using defined time step.
@@ -368,19 +416,20 @@ def main():
     # Maximum metabolic and growth rates
     mmr = Pm * CChl_to_Cbm * Cbm_to_percell / (12*3600)  # mol CO2 / cell / s
     mgr = Pm * CChl_to_Cbm / 3600  # growth rate in /s
-    
-    # Parameters from Matano model paper
+
     R_no3 = 2.5  # Half-saturation constant for NO3 (μmol/L)
     R_a = 2.5  # Half-saturation constant for NH4+ (μmol/L)
     k_p_opnnf = 0.014 # Half-saturation constant for P in non-nitrogen fixing oxygenic phototrophs (μmol/L)
     k_t = 0.0693 # Temperature dependence (°C^-1)
     a_inh = 1e9 # Inhibition constant (mol/kg)^-1 (converted from 1e6 mmol/L^-1)
-    H2S_inh = 1.0  # Inhibition constant for H2S (mol/kg) (converted from 1 μmol/L)
-    
+    H2S_inh = 1.0  # Inhibition constant for H2S (μM)
+
+    k_p_gsb = 1.6 # Phosphorus limitation for green sulfur bacteria (μM)
+    k_h2s_gsb = 2.0 # Sulfide limitation for green sulfur bacteria (μM)
+    O2_inh = 1.0 # Inhibition constant for O2 (μM)
+    k_l_gsb = 1.0 # Light limitation constant for green sulfur bacteria (μmol photons m⁻²) <- check units
 
     # Calculate forcing factors for graphing
-    # Irradiance forcing factor
-    F_E = Platt_tanh(None, alpha, Pm, m_data['par'])
 
     # Nitrogen forcing factor (β_t)
     NO3_no_nan = np.nan_to_num(m_data['NO3'], nan=0.0)
@@ -388,17 +437,33 @@ def main():
     F_N = Monod_nitrogen(NO3_no_nan, NH4_no_nan, R_no3, R_a)
     F_N[np.isnan(m_data['NO3']) & np.isnan(m_data['NH4'])] = np.nan  # hide depths with no N data at all
 
+    # ---- OPNNF ----
+    # Irradiance forcing factor
+    # F_E_opnnf = Platt_tanh(None, alpha, Pm, m_data['par'])
+
+    # # Phosphorus forcing factor
+    # F_P_opnnf = Monod(None, m_data['P'], k_p_opnnf)
+
+    # # Sulfur inhibition forcing factor
+    # F_S_inh_opnnf = inhibition(None, np.nan_to_num(m_data['H2S'], nan=0.0), a_inh, H2S_inh)
+
+    # ---- GSB ----
+    # Irradiance forcing factor
+    F_E = Monod(None, m_data['par'], k_l_gsb)
+
     # Phosphorus forcing factor
-    F_P = Monod_phosphorus(m_data['P'], k_p_opnnf)
+    F_P_gsb = Monod(None, m_data['P'], k_p_gsb)
 
-    # Sulfur inhibition forcing factor
-    F_S = inhibition(None, np.nan_to_num(m_data['H2S'], nan=0.0), a_inh, H2S_inh)
+    # Sulfur forcing factor
+    F_H2S_gsb = Monod(None, m_data['H2S'], k_h2s_gsb)
 
-    print(len(m_data['NO3']))
+    # Oxygen inhibition forcing factor
+    F_O2_inh_gsb = inhibition(None, np.nan_to_num(m_data['O2'], nan=0.0), a_inh, O2_inh)
     
     # Calculate phototroph growth rates (where we have nitrogen data)
     print("Calculating growth rates...")
     prod_opnnf = np.full(len(m_data['depth']), np.nan)
+    prod_gsb = np.full(len(m_data['depth']), np.nan)
     
     for i in range(len(m_data['depth'])):
         # Only calculate if we have at least one nitrogen source
@@ -409,11 +474,17 @@ def main():
             H2S_calc = 0 if np.isnan(m_data['H2S'][i]) else m_data['H2S'][i]
             
             try:
-                phototroph = get_phototroph(R, rxn, Pm, m_data['par'][i], alpha, NO3_calc, NH4_calc, m_data['P'][i], R_no3, R_a, k_p_opnnf, H2S_calc, a_inh, H2S_inh, mmr, mgr * temperature_modifier(m_data['temp'][i], k_t))
-                prod_opnnf[i] = get_phototroph_rate(phototroph)
-
+                opnnf = get_opnnf(R, rxn, Pm, m_data['par'][i], alpha, NO3_calc, NH4_calc, m_data['P'][i], R_no3, R_a, k_p_opnnf, H2S_calc, a_inh, H2S_inh, mmr, mgr * temperature_modifier(m_data['temp'][i], k_t))
+                prod_opnnf[i] = get_phototroph_rate(opnnf)
             except:
                 prod_opnnf[i] = np.nan
+            
+            try:
+                gsb = get_gsb(R, rxn, Pm, m_data['par'][i], k_l_gsb, alpha, NO3_calc, NH4_calc, m_data['P'][i], m_data['O2'][i], R_no3, R_a, k_p_gsb, k_h2s_gsb, H2S_calc, a_inh, O2_inh, mmr, mgr * temperature_modifier(m_data['temp'][i], k_t))
+                prod_gsb[i] = get_phototroph_rate(gsb)
+            except Exception as e:
+                prod_gsb[i] = np.nan
+                # print("error depth:", i, ": ", e)
     
     # Plot results
     fig, axes = plt.subplots(1, 4, figsize=(18, 6))
@@ -447,8 +518,13 @@ def main():
     # Plot 3: Forcing factors (light, nitrogen, phosphorus)
     axes[2].plot(F_E, m_data['depth'], label='F_I (irradiance)', linewidth=2, color='orange')
     axes[2].plot(F_N, m_data['depth'], label='β_t (total nitrogen availability)', linewidth=2, color='blue')
-    axes[2].plot(F_P, m_data['depth'], label='F_P (total phosphorus availability)', linewidth=2, color='green')
-    axes[2].plot(F_S, m_data['depth'], label='F_S (sulfur inhibition)', linewidth=2, color='red')
+    # axes[2].plot(F_P_opnnf, m_data['depth'], label='F_P (total phosphorus availability)', linewidth=2, color='green')
+    # axes[2].plot(F_S_inh_opnnf, m_data['depth'], label='F_S (sulfur inhibition)', linewidth=2, color='red')
+
+    axes[2].plot(F_P_gsb, m_data['depth'], label='F_P (total phosphorus availability)', linewidth=2, color='green')
+    axes[2].plot(F_H2S_gsb, m_data['depth'], label='F_H2S (total sulfur availability)', linewidth=2, color='purple')
+    axes[2].plot(F_O2_inh_gsb, m_data['depth'], label='F_O2 (O2 inhibition)', linewidth=2, color='red')
+
     axes[2].invert_yaxis()
     axes[2].set_xlim(0, 1.05)
     axes[2].set_ylim(200, 0)
@@ -460,6 +536,7 @@ def main():
 
     # Plot 4: Growth rate
     axes[3].plot(prod_opnnf*1e6, m_data['depth'], label='Non-Nitrogen Fixing Oxygenic Phototrophs', color='red', linewidth=2)
+    axes[3].plot(prod_gsb*1e6, m_data['depth'], label='Green Sulfur Bacteria', color='green', linewidth=2)
     axes[3].invert_yaxis()
     axes[3].set_ylim(200, 0)
     axes[3].set_xlabel('Growth Rate (×10⁶ s⁻¹)', fontsize=12)
