@@ -37,9 +37,9 @@ def load_matano_data(url, interpolate=False):
     # TEST: Add row with H2S
     df_long = pd.concat([df_long, pd.DataFrame([{'parameter': 'H2S', 'depth_m': 100, 'value': 0}])], ignore_index=True)
     # Change first two NO3 data points
-    df_long.loc[(df_long['parameter'] == 'NO3') & (df_long['depth_m'] == 9), 'value'] = 0.0
-    df_long.loc[(df_long['parameter'] == 'NO3') & (df_long['depth_m'] == 20), 'value'] = 0.0
-
+    # df_long.loc[(df_long['parameter'] == 'NO3') & (df_long['depth_m'] == 9), 'value'] = 0.0
+    # df_long.loc[(df_long['parameter'] == 'NO3') & (df_long['depth_m'] == 20), 'value'] = 0.0
+    
     # Parameters we want to extract, mapped to their specific years
     # Empty string '' means no year value (NaN in the 'year' column)
     params = {
@@ -48,7 +48,7 @@ def load_matano_data(url, interpolate=False):
         'P': 2005,
         'par': 2007,
         'temp': 2004,
-        'H2S': '', # TEMP change back to ''
+        'H2S': '',
         'SO4': '',
         'O2': 2004
     }
@@ -417,9 +417,9 @@ def main():
     mmr = Pm * CChl_to_Cbm * Cbm_to_percell / (12*3600)  # mol CO2 / cell / s
     mgr = Pm * CChl_to_Cbm / 3600  # growth rate in /s
 
-    R_no3 = 2.5  # Half-saturation constant for NO3 (μmol/L)
-    R_a = 2.5  # Half-saturation constant for NH4+ (μmol/L)
-    k_p_opnnf = 0.014 # Half-saturation constant for P in non-nitrogen fixing oxygenic phototrophs (μmol/L)
+    R_no3 = 2.5  # Half-saturation constant for NO3 (μM)
+    R_a = 2.5  # Half-saturation constant for NH4+ (μM)
+    k_p_opnnf = 0.014 # Half-saturation constant for P in non-nitrogen fixing oxygenic phototrophs (μM)
     k_t = 0.0693 # Temperature dependence (°C^-1)
     a_inh = 1e9 # Inhibition constant (mol/kg)^-1 (converted from 1e6 mmol/L^-1)
     H2S_inh = 1.0  # Inhibition constant for H2S (μM)
@@ -487,73 +487,79 @@ def main():
                 # print("error depth:", i, ": ", e)
     
     # Plot results
-    fig, axes = plt.subplots(1, 5, figsize=(22, 6))
+    fig, axes = plt.subplots(2, 3, figsize=(10, 8))
     
-    # Plot 1: PAR vs depth
-    axes[0].scatter(m_raw['par'], m_raw['depth'], color='goldenrod', s=40, marker='.')
-    axes[0].invert_yaxis()
-    axes[0].set_xscale('log')
-    axes[0].set_ylim(200, 0)
-    axes[0].set_xlabel('PAR (μmol photons m⁻² s⁻¹)', fontsize=12)
-    axes[0].set_ylabel('Depth (m)', fontsize=10)
-    axes[0].set_title('Light Extinction', fontsize=13, fontweight='bold')
-    axes[0].grid(True, alpha=0.3)
+    # Row 1, Plot 1: Growth rate
+    axes[0, 0].plot(prod_opnnf*1e6, m_data['depth'], label='Non-Nitrogen Fixing Oxygenic Phototrophs', color='red', linewidth=2)
+    axes[0, 0].plot(prod_gsb*1e6, m_data['depth'], label='Green Sulfur Bacteria', color='green', linewidth=2)
+    axes[0, 0].invert_yaxis()
+    axes[0, 0].set_ylim(200, 0)
+    axes[0, 0].set_xlabel('Growth Rate (×10⁶ s⁻¹)', fontsize=12)
+    axes[0, 0].set_ylabel('Depth (m)', fontsize=10)
+    axes[0, 0].set_title('Phototroph Growth Rate', fontsize=13, fontweight='bold')
+    axes[0, 0].legend(loc='lower right', fontsize=7)
+    axes[0, 0].grid(True, alpha=0.3)
 
-    # Plot 2: Chemical species concentrations
-    axes[1].scatter(m_raw['NO3'] * 100, m_raw['depth'], label='NO₃⁻ (μmol/L) ×100', color='red', s=20, marker='D')
-    axes[1].scatter(m_raw['NH4'], m_raw['depth'], label='NH₄⁺ (μmol/L)', color='purple', s=30, marker='X')
-    axes[1].scatter(m_raw['P'] * 100, m_raw['depth'], label='P (μmol/L) ×100', color='blue', s=30, marker='+')
-    axes[1].scatter(m_raw['H2S'] * 1000, m_raw['depth'], label='H₂S (μmol/L) ×1000', color='green', s=30, marker='P')
-    axes[1].scatter(m_raw['SO4'] * 10, m_raw['depth'], label='SO₄ (μmol/L) ×10', color='lightseagreen', s=30, marker='P')
-    axes[1].scatter(m_raw['O2'], m_raw['depth'], label='O₂ (μmol/L)', color='orange', s=20, marker='o')
-    axes[1].invert_yaxis()
-    axes[1].set_xlim(0, 650)
-    axes[1].set_ylim(200, 0)
-    axes[1].set_title('Chemical Species Concentrations', fontsize=13, fontweight='bold')
-    axes[1].set_xlabel('Concentration (μmol/L)', fontsize=12)
-    axes[1].set_ylabel('Depth (m)', fontsize=10)
-    axes[1].legend(loc='upper right')
-    axes[1].grid(True, alpha=0.3)
+    # Row 1, Plot 2: OPNNF Forcing factors
+    axes[0, 1].plot(F_E_opnnf, m_data['depth'], label='F_I (irradiance)', linewidth=2, color='orange')
+    axes[0, 1].plot(F_N, m_data['depth'], label='β_t (nitrogen availability)', linewidth=2, color='blue')
+    axes[0, 1].plot(F_P_opnnf, m_data['depth'], label='F_P (phosphorus availability)', linewidth=2, color='green')
+    axes[0, 1].plot(F_S_inh_opnnf, m_data['depth'], label='F_S (sulfur inhibition)', linewidth=2, color='red')
+    axes[0, 1].invert_yaxis()
+    axes[0, 1].set_xlim(0, 1.05)
+    axes[0, 1].set_ylim(200, 0)
+    axes[0, 1].set_xlabel('Forcing Factor', fontsize=12)
+    axes[0, 1].set_title('OPNNF Forcing Factors', fontsize=13, fontweight='bold')
+    axes[0, 1].legend(loc='lower left', fontsize=7)
+    axes[0, 1].grid(True, alpha=0.3)
+
+    # Row 1, Plot 3: GSB Forcing factors
+    axes[0, 2].plot(F_E_gsb, m_data['depth'], label='F_I (irradiance)', linewidth=2, color='orange')
+    axes[0, 2].plot(F_N, m_data['depth'], label='β_t (total nitrogen availability)', linewidth=2, color='blue')
+    axes[0, 2].plot(F_P_gsb, m_data['depth'], label='F_P (total phosphorus availability)', linewidth=2, color='green')
+    axes[0, 2].plot(F_H2S_gsb, m_data['depth'], label='F_H2S (total sulfur availability)', linewidth=2, color='purple')
+    axes[0, 2].plot(F_O2_inh_gsb, m_data['depth'], label='F_O2 (O2 inhibition)', linewidth=2, color='red')
+    axes[0, 2].invert_yaxis()
+    axes[0, 2].set_xlim(0, 1.05)
+    axes[0, 2].set_ylim(200, 0)
+    axes[0, 2].set_xlabel('Forcing Factor', fontsize=12)
+    axes[0, 2].set_title('GSB Forcing Factors', fontsize=13, fontweight='bold')
+    axes[0, 2].legend(loc='lower right', fontsize=6)
+    axes[0, 2].grid(True, alpha=0.3)
     
-    # Plot 3: GSB Forcing factors
-    axes[2].plot(F_E_gsb, m_data['depth'], label='F_I (irradiance)', linewidth=2, color='orange')
-    axes[2].plot(F_N, m_data['depth'], label='β_t (total nitrogen availability)', linewidth=2, color='blue')
-    axes[2].plot(F_P_gsb, m_data['depth'], label='F_P (total phosphorus availability)', linewidth=2, color='green')
-    axes[2].plot(F_H2S_gsb, m_data['depth'], label='F_H2S (total sulfur availability)', linewidth=2, color='purple')
-    axes[2].plot(F_O2_inh_gsb, m_data['depth'], label='F_O2 (O2 inhibition)', linewidth=2, color='red')
-    axes[2].invert_yaxis()
-    axes[2].set_xlim(0, 1.05)
-    axes[2].set_ylim(200, 0)
-    axes[2].set_xlabel('Forcing Factor', fontsize=12)
-    axes[2].set_ylabel('Depth (m)', fontsize=10)
-    axes[2].set_title('Individual Forcing Factors', fontsize=13, fontweight='bold')
-    axes[2].legend(loc='lower right')
-    axes[2].grid(True, alpha=0.3)
+    # Row 2, Plot 1: PAR vs depth
+    axes[1, 0].scatter(m_raw['par'], m_raw['depth'], color='goldenrod', s=40, marker='.')
+    axes[1, 0].invert_yaxis()
+    axes[1, 0].set_xscale('log')
+    axes[1, 0].set_ylim(200, 0)
+    axes[1, 0].set_xlabel('PAR (μmol photons m⁻² s⁻¹)', fontsize=12)
+    axes[1, 0].set_ylabel('Depth (m)', fontsize=10)
+    axes[1, 0].set_title('Light Extinction', fontsize=13, fontweight='bold')
+    axes[1, 0].grid(True, alpha=0.3)
 
-    # Plot 4: OPNNF Forcing factors
-    axes[3].plot(F_E_opnnf, m_data['depth'], label='F_I (irradiance)', linewidth=2, color='orange')
-    axes[3].plot(F_N, m_data['depth'], label='β_t (nitrogen availability)', linewidth=2, color='blue')
-    axes[3].plot(F_P_opnnf, m_data['depth'], label='F_P (phosphorus availability)', linewidth=2, color='green')
-    axes[3].plot(F_S_inh_opnnf, m_data['depth'], label='F_S (sulfur inhibition)', linewidth=2, color='red')
-    axes[3].invert_yaxis()
-    axes[3].set_xlim(0, 1.05)
-    axes[3].set_ylim(200, 0)
-    axes[3].set_xlabel('Forcing Factor', fontsize=12)
-    axes[3].set_ylabel('Depth (m)', fontsize=10)
-    axes[3].set_title('OPNNF Forcing Factors', fontsize=13, fontweight='bold')
-    axes[3].legend(loc='lower right')
-    axes[3].grid(True, alpha=0.3)
-
-    # Plot 5: Growth rate
-    axes[4].plot(prod_opnnf*1e6, m_data['depth'], label='Non-Nitrogen Fixing Oxygenic Phototrophs', color='red', linewidth=2)
-    axes[4].plot(prod_gsb*1e6, m_data['depth'], label='Green Sulfur Bacteria', color='green', linewidth=2)
-    axes[4].invert_yaxis()
-    axes[4].set_ylim(200, 0)
-    axes[4].set_xlabel('Growth Rate (×10⁶ s⁻¹)', fontsize=12)
-    axes[4].set_ylabel('Depth (m)', fontsize=10)
-    axes[4].set_title('Phototroph Growth Rate', fontsize=13, fontweight='bold')
-    axes[4].legend(loc='lower right', fontsize='small')
-    axes[4].grid(True, alpha=0.3)
+    # Row 2, Plot 2: Chemical species concentrations (NO3, NH4, P)
+    axes[1, 1].scatter(m_raw['NO3'] * 100, m_raw['depth'], label='NO₃⁻ (μM) ×100', color='red', s=20, marker='D')
+    axes[1, 1].scatter(m_raw['NH4'], m_raw['depth'], label='NH₄⁺ (μM)', color='purple', s=30, marker='X')
+    axes[1, 1].scatter(m_raw['P'] * 100, m_raw['depth'], label='P (μM) ×100', color='blue', s=30, marker='+')
+    axes[1, 1].invert_yaxis()
+    axes[1, 1].set_xlim(0, 650)
+    axes[1, 1].set_ylim(200, 0)
+    axes[1, 1].set_title('Chemical Species', fontsize=13, fontweight='bold')
+    axes[1, 1].set_xlabel('Concentration (μM)', fontsize=12)
+    axes[1, 1].legend(loc='upper right', fontsize=7)
+    axes[1, 1].grid(True, alpha=0.3)
+    
+    # Row 2, Plot 3: Chemical species concentrations (O2, H2S, SO4)
+    axes[1, 2].scatter(m_raw['H2S'] * 1000, m_raw['depth'], label='H₂S (μM) ×1000', color='green', s=30, marker='P')
+    axes[1, 2].scatter(m_raw['SO4'] * 10, m_raw['depth'], label='SO₄ (μM) ×10', color='lightseagreen', s=30, marker='P')
+    axes[1, 2].scatter(m_raw['O2'], m_raw['depth'], label='O₂ (μM)', color='orange', s=20, marker='o')
+    axes[1, 2].invert_yaxis()
+    axes[1, 2].set_xlim(0, 400)
+    axes[1, 2].set_ylim(200, 0)
+    axes[1, 2].set_title('Chemical Species', fontsize=13, fontweight='bold')
+    axes[1, 2].set_xlabel('Concentration (μM)', fontsize=12)
+    axes[1, 2].legend(loc='lower right', fontsize=7)
+    axes[1, 2].grid(True, alpha=0.3)
     
     fig.suptitle('Predicted Primary Production in Lake Matano', 
                  fontsize=15, fontweight='bold')
