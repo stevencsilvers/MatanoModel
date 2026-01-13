@@ -439,17 +439,17 @@ def main():
 
     # ---- OPNNF ----
     # Irradiance forcing factor
-    # F_E_opnnf = Platt_tanh(None, alpha, Pm, m_data['par'])
+    F_E_opnnf = Platt_tanh(None, alpha, Pm, m_data['par'])
 
-    # # Phosphorus forcing factor
-    # F_P_opnnf = Monod(None, m_data['P'], k_p_opnnf)
+    # Phosphorus forcing factor
+    F_P_opnnf = Monod(None, m_data['P'], k_p_opnnf)
 
-    # # Sulfur inhibition forcing factor
-    # F_S_inh_opnnf = inhibition(None, np.nan_to_num(m_data['H2S'], nan=0.0), a_inh, H2S_inh)
+    # Sulfur inhibition forcing factor
+    F_S_inh_opnnf = inhibition(None, np.nan_to_num(m_data['H2S'], nan=0.0), a_inh, H2S_inh)
 
     # ---- GSB ----
     # Irradiance forcing factor
-    F_E = Monod(None, m_data['par'], k_l_gsb)
+    F_E_gsb = Monod(None, m_data['par'], k_l_gsb)
 
     # Phosphorus forcing factor
     F_P_gsb = Monod(None, m_data['P'], k_p_gsb)
@@ -487,7 +487,7 @@ def main():
                 # print("error depth:", i, ": ", e)
     
     # Plot results
-    fig, axes = plt.subplots(1, 4, figsize=(18, 6))
+    fig, axes = plt.subplots(1, 5, figsize=(22, 6))
     
     # Plot 1: PAR vs depth
     axes[0].scatter(m_raw['par'], m_raw['depth'], color='goldenrod', s=40, marker='.')
@@ -515,16 +515,12 @@ def main():
     axes[1].legend(loc='upper right')
     axes[1].grid(True, alpha=0.3)
     
-    # Plot 3: Forcing factors (light, nitrogen, phosphorus)
-    axes[2].plot(F_E, m_data['depth'], label='F_I (irradiance)', linewidth=2, color='orange')
+    # Plot 3: GSB Forcing factors
+    axes[2].plot(F_E_gsb, m_data['depth'], label='F_I (irradiance)', linewidth=2, color='orange')
     axes[2].plot(F_N, m_data['depth'], label='β_t (total nitrogen availability)', linewidth=2, color='blue')
-    # axes[2].plot(F_P_opnnf, m_data['depth'], label='F_P (total phosphorus availability)', linewidth=2, color='green')
-    # axes[2].plot(F_S_inh_opnnf, m_data['depth'], label='F_S (sulfur inhibition)', linewidth=2, color='red')
-
     axes[2].plot(F_P_gsb, m_data['depth'], label='F_P (total phosphorus availability)', linewidth=2, color='green')
     axes[2].plot(F_H2S_gsb, m_data['depth'], label='F_H2S (total sulfur availability)', linewidth=2, color='purple')
     axes[2].plot(F_O2_inh_gsb, m_data['depth'], label='F_O2 (O2 inhibition)', linewidth=2, color='red')
-
     axes[2].invert_yaxis()
     axes[2].set_xlim(0, 1.05)
     axes[2].set_ylim(200, 0)
@@ -534,16 +530,30 @@ def main():
     axes[2].legend(loc='lower right')
     axes[2].grid(True, alpha=0.3)
 
-    # Plot 4: Growth rate
-    axes[3].plot(prod_opnnf*1e6, m_data['depth'], label='Non-Nitrogen Fixing Oxygenic Phototrophs', color='red', linewidth=2)
-    axes[3].plot(prod_gsb*1e6, m_data['depth'], label='Green Sulfur Bacteria', color='green', linewidth=2)
+    # Plot 4: OPNNF Forcing factors
+    axes[3].plot(F_E_opnnf, m_data['depth'], label='F_I (irradiance)', linewidth=2, color='orange')
+    axes[3].plot(F_N, m_data['depth'], label='β_t (nitrogen availability)', linewidth=2, color='blue')
+    axes[3].plot(F_P_opnnf, m_data['depth'], label='F_P (phosphorus availability)', linewidth=2, color='green')
+    axes[3].plot(F_S_inh_opnnf, m_data['depth'], label='F_S (sulfur inhibition)', linewidth=2, color='red')
     axes[3].invert_yaxis()
+    axes[3].set_xlim(0, 1.05)
     axes[3].set_ylim(200, 0)
-    axes[3].set_xlabel('Growth Rate (×10⁶ s⁻¹)', fontsize=12)
+    axes[3].set_xlabel('Forcing Factor', fontsize=12)
     axes[3].set_ylabel('Depth (m)', fontsize=10)
-    axes[3].set_title('Phototroph Growth Rate', fontsize=13, fontweight='bold')
-    axes[3].legend(loc='lower right', fontsize='small')
+    axes[3].set_title('OPNNF Forcing Factors', fontsize=13, fontweight='bold')
+    axes[3].legend(loc='lower right')
     axes[3].grid(True, alpha=0.3)
+
+    # Plot 5: Growth rate
+    axes[4].plot(prod_opnnf*1e6, m_data['depth'], label='Non-Nitrogen Fixing Oxygenic Phototrophs', color='red', linewidth=2)
+    axes[4].plot(prod_gsb*1e6, m_data['depth'], label='Green Sulfur Bacteria', color='green', linewidth=2)
+    axes[4].invert_yaxis()
+    axes[4].set_ylim(200, 0)
+    axes[4].set_xlabel('Growth Rate (×10⁶ s⁻¹)', fontsize=12)
+    axes[4].set_ylabel('Depth (m)', fontsize=10)
+    axes[4].set_title('Phototroph Growth Rate', fontsize=13, fontweight='bold')
+    axes[4].legend(loc='lower right', fontsize='small')
+    axes[4].grid(True, alpha=0.3)
     
     fig.suptitle('Predicted Primary Production in Lake Matano', 
                  fontsize=15, fontweight='bold')
