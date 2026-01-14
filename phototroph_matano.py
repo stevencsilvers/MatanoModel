@@ -38,11 +38,11 @@ def load_matano_data(url, interpolate=False):
     df_long = pd.concat([df_long, pd.DataFrame([{'parameter': 'H2S', 'depth_m': 0, 'value': 0}])], ignore_index=True)
     df_long = pd.concat([df_long, pd.DataFrame([{'parameter': 'H2S', 'depth_m': 100, 'value': 0}])], ignore_index=True)
     # Change first two NO3 data points
-    df_long.loc[(df_long['parameter'] == 'NO3') & (df_long['depth_m'] == 9), 'value'] = 0.0
-    df_long.loc[(df_long['parameter'] == 'NO3') & (df_long['depth_m'] == 20), 'value'] = 0.0
+    # df_long.loc[(df_long['parameter'] == 'NO3') & (df_long['depth_m'] == 9), 'value'] = 0.0
+    # df_long.loc[(df_long['parameter'] == 'NO3') & (df_long['depth_m'] == 20), 'value'] = 0.0
 
     # TEST change P concentration to 0 at DL instead of 0.025
-    # df_long.loc[(df_long['parameter'] == 'P') & (df_long['value'] == 0.025), 'value'] = 0.0
+    df_long.loc[(df_long['parameter'] == 'P') & (df_long['value'] == 0.025), 'value'] = 0.05
 
     # Parameters we want to extract, mapped to their specific years
     # Empty string '' means no year value (NaN in the 'year' column)
@@ -193,31 +193,37 @@ def Platt_tanh(resp, alpha, Pmax, I):
     return np.tanh(alpha * I / Pmax)
 
 
-def Monod_n_p(resp, NO3, NH4, P, R_no3, R_a, k_p):
+def phi_opnnf(resp, NO3, NH4, P, R_no3, R_a, k_p):
     """
     Forcing function for growth inhibition based on bioavailable nitrogen and phosphorus.
     Based on Matano paper page 40, equation 9.
 
     This follows the Matano model formulation:
-        beta_t = beta_NO3 + beta_a (NH4)
+        β_t = β_NO3 + β_a (NH4)
+        Where β_NO3 and β_a are Monod terms for NO3 and NH4 respectively.
+        NO2 not included as there is no data and there is a very low concentration of it in Lake Matano
 
     Parameters
     ----------
     resp : NoneType
         Placeholder for NutMEG forcing function interface
     NO3 : float
-        Nitrate concentration (mol/kg)
+        Nitrate concentration (μM)
     NH4 : float
-        Ammonium concentration (mol/kg)
+        Ammonium concentration (μM)
+    P : float
+        Phosphorus concentration (μM)
     R_no3: float
-        Monod half-saturation constant for NO3 uptake
+        Monod half-saturation constant for NO3 uptake (μM)
     R_a : float
-        Monod half-saturation constant for NH4 uptake
+        Monod half-saturation constant for NH4 uptake (μM)
+    k_p : float
+        Monod half-saturation constant for P uptake, different for each phototroph type (μM)
     """
     return min(Monod_nitrogen(NO3, NH4, R_no3, R_a), Monod(None, P, k_p))
 
 
-def Monod_gsb(resp, NO3, NH4, P, H2S, R_no3, R_a, k_p, k_h2s):
+def phi_gsb(resp, NO3, NH4, P, H2S, R_no3, R_a, k_p, k_h2s):
     return min(Monod_nitrogen(NO3, NH4, R_no3, R_a), Monod(None, P, k_p), Monod(None, H2S, k_h2s))
 
 def Monod_nitrogen(NO3, NH4, R_no3, R_a):
@@ -226,8 +232,8 @@ def Monod_nitrogen(NO3, NH4, R_no3, R_a):
     return beta_NO3 + beta_a
 
 
-def Monod(resp, A, k):
-    return A / (k + A)
+def Monod(resp, S, k_S):
+    return S / (k_S + S)
 
 
 def temperature_modifier(t, k_t):
@@ -235,28 +241,38 @@ def temperature_modifier(t, k_t):
 
 
 def light_opnf(resp, I, I_opt):
-    return (I_opt / I) * np.exp(1 - (I_opt / I))
-
-
-def inhibition(resp, species, a_inh, species_inh):
     """
-    Forcing function for growth inhibition based on H2S concentration.
+    Forcing function for light limitation in nitrogen-fixing oxygenic phototrophs.
 
     Parameters
     ----------
-    species : float
-        Concentration of the inhibiting species (mol/kg)
+    I : float
+        Irradiance (µmol photons m⁻² s⁻¹)
+    I_opt : float
+        Optimal irradiance (µmol photons m⁻² s⁻¹)
+    """
+    return (I_opt / I) * np.exp(1 - (I_opt / I))
+
+
+def inhibition(resp, S, a_inh, S_inh):
+    """
+    Forcing function for growth inhibition based on chemical species (S) concentration.
+
+    Parameters
+    ----------
+    S : float
+        Concentration of the inhibiting species (µM)
     a_inh : float
         Inhibition constant
-    species_inh : float
+    S_inh : float
         Inhibition constant for the species
     """
-    return 0.5 * (1 - np.tanh(a_inh * (species - species_inh)))
+    return 0.5 * (1 - np.tanh(a_inh * (S - S_inh)))
 
 
-def get_opnnf(R, rxn, Pm, I, k_l_opnnf, alpha, NO3, NH4, P, R_no3, R_a, k_p_opnnf, H2S, a_inh, H2S_inh, mmr, mgr, num=1e6, name='Non-Nitrogen-Fixing Oxygenic Phototroph'):
+def get_opnnf(R, rxn, Pm, I, k_l_opnnf, alpha, NO3, NH4, P, H2S, R_no3, R_a, k_p_opnnf, a_inh, H2S_inh, mmr, mgr, num=1e6, name='Non-Nitrogen-Fixing Oxygenic Phototroph'):
     """
-    Create a NutMEG.horde object representing a non-nitrogen-fixing oxygenic phototroph.
+    Create a NutMEG.horde object representing non-nitrogen-fixing oxygenic phototrophs.
 
     Parameters
     ----------
@@ -268,26 +284,34 @@ def get_opnnf(R, rxn, Pm, I, k_l_opnnf, alpha, NO3, NH4, P, R_no3, R_a, k_p_opnn
         Platt fitting parameter which defines the maximum productivity in
         mg C / mg Chl a / h (or commensurate with alpha)
     I : float
-        Irradiance in W / m2 (or commensurate with alpha)
+        Irradiance (µmol photons m⁻² s⁻¹)
+    k_l_opnnf : float
+        Monod half-saturation constant of light uptake for a non-nitrogen-fixing oxygenic phototroph (µmol photons m⁻² s⁻¹)
     alpha : float
         Platt fitting parameter which defines the slope of the P vs I curve
         at I=0.
-    N : float
-        Concentration of bioavailable N in mol/kg
-    K_N : float
-        Monod half-saturation constant of N uptake in mol/kg
+    NO3 : float
+        Concentration of NO3 (µM)
+    NH4 : float
+        Concentration of NH4 (µM)
+    P : float
+        Concentration of P (µM)
+    R_no3 : float
+        Monod half-saturation constant of NO3 uptake (µM)
+    R_a : float
+        Monod half-saturation constant of NH4 uptake (µM)
+    k_p_opnnf : float
+        Monod half-saturation constant of P uptake for a non-nitrogen-fixing oxygenic phototroph (µM)
     mmr : float
-        Maximum metabolic rate (aka zeroth order rate constant k_max) in
-        mol of reaction / s.
+        Maximum metabolic rate (aka zeroth order rate constant k_max) (mol of reaction / s)
     mgr : float
-        Maximum growth rate (aka mu_max) in /s.
+        Maximum growth rate (aka mu_max) (/s)
     num : float, optional
         Number of organisms in the horde. Larger hordes will yield more precise
         growth rates but risk consuming all resources in long time-steps.
         Default 1e6 (per kg water)
     name : str, optional
         String identifier for this organism. Default 'Phototroph'
-
     """
 
     _phototroph = nm.horde(
@@ -305,39 +329,19 @@ def get_opnnf(R, rxn, Pm, I, k_l_opnnf, alpha, NO3, NH4, P, R_no3, R_a, k_p_opnn
         },
         CHNOPS_kwargs={
             'max_growth_rate': mgr,
-            ##
-            ## Adding forcing functions is currently quite complicated.
-            ## Two attributes need to be adjusted in the host's CHNOPS attribute:
-            ##
-            ## CHNOPS_forcing_parameters:
-            ##   dict of {name: (function, [required attributes])}
-            ##
-            ## CHNOPS_F_attrs:
-            ##   dict mapping required attributes to values
-            ##
-            ## This structure accommodates multiple forcing functions
-            ## depending on shared environmental attributes.
-            ##
             'CHNOPS_forcing_parameters': {
-                'Phi': (Monod_n_p, ['NO3', 'NH4', 'P', 'R_no3', 'R_a', 'k_p_opnnf']),
+                'Phi': (phi_opnnf, ['NO3', 'NH4', 'P', 'R_no3', 'R_a', 'k_p_opnnf']),
                 # 'Platt': (Platt_tanh, ['alpha', 'Pmax', 'I']),
                 'Light': (Monod, ['I', 'k_l_opnnf']),
                 'Sulfur': (inhibition, ['H2S', 'a_inh', 'H2S_inh'])
             },
             'CHNOPS_F_attrs': {
-                'NO3': NO3,
-                'NH4': NH4,
-                'P': P,
-                'R_no3': R_no3,
-                'R_a': R_a,
-                'k_p_opnnf': k_p_opnnf,
-                'alpha': alpha,
-                'I': I,
-                'k_l_opnnf': k_l_opnnf,
                 'Pmax': Pm,
-                'H2S': H2S,
-                'a_inh': a_inh,
-                'H2S_inh': H2S_inh
+                'I': I, 'k_l_opnnf': k_l_opnnf, 'alpha': alpha,
+                'NO3': NO3, 'NH4': NH4, 'P': P, 'H2S': H2S,
+                'R_no3': R_no3, 'R_a': R_a,
+                'k_p_opnnf': k_p_opnnf,
+                'a_inh': a_inh, 'H2S_inh': H2S_inh
             }
         }
     )
@@ -345,7 +349,57 @@ def get_opnnf(R, rxn, Pm, I, k_l_opnnf, alpha, NO3, NH4, P, R_no3, R_a, k_p_opnn
     return _phototroph
 
 
-def get_gsb(R, rxn, Pm, I, k_l_gsb, alpha, NO3, NH4, P, O2, R_no3, R_a, k_p_gsb, k_h2s_gsb, H2S, a_inh, O2_inh, mmr, mgr, num=1e6, name='Green Sulfur Bacterium'):
+def get_gsb(R, rxn, Pm, I, k_l_gsb, NO3, NH4, P, O2, H2S, R_no3, R_a, k_p_gsb, k_h2s_gsb, a_inh, O2_inh, mmr, mgr, num=1e6, name='Green Sulfur Bacterium'):
+    """
+    Create a NutMEG.horde object representing green sulfur bacteria.
+
+    Parameters
+    ----------
+    R : NutMEG.reactor
+        reactor object hosting the organism
+    rxn : NutMEG.reaction
+        reaction object hosting the overall metabolic reaction
+    Pm : float
+        Platt fitting parameter which defines the maximum productivity in
+        mg C / mg Chl a / h (or commensurate with alpha)
+    I : float
+        Irradiance (µmol photons m⁻² s⁻¹)
+    k_l_gsb : float
+        Monod half-saturation constant of light uptake for green sulfur bacteria (µmol photons m⁻² s⁻¹)
+    NO3 : float
+        Concentration of NO3 (µM)
+    NH4 : float
+        Concentration of NH4 (µM)
+    P : float
+        Concentration of P (µM)
+    O2 : float
+        Concentration of O2 (µM)
+    H2S : float
+        Concentration of H2S (µM)
+    R_no3 : float
+        Monod half-saturation constant of NO3 uptake (µM)
+    R_a : float
+        Monod half-saturation constant of NH4 uptake (µM)
+    k_p_gsb : float
+        Monod half-saturation constant of P uptake for green sulfur bacteria (µM)
+    k_h2s_gsb : float
+        Monod half-saturation constant of H2S uptake for green sulfur bacteria (µM)
+    a_inh : float
+        Inhibition constant
+    O2_inh : float
+        Inhibition constant for O2
+    mmr : float
+        Maximum metabolic rate (aka zeroth order rate constant k_max) (mol of reaction / s)
+    mgr : float
+        Maximum growth rate (aka mu_max) (/s)
+    num : float, optional
+        Number of organisms in the horde. Larger hordes will yield more precise
+        growth rates but risk consuming all resources in long time-steps.
+        Default 1e6 (per kg water)
+    name : str, optional
+        String identifier for this organism. Default 'Phototroph'
+    """
+    
     _phototroph = nm.horde(
         name, R, rxn, num,
         unit='cells',  # alternative units are not yet supported
@@ -362,27 +416,18 @@ def get_gsb(R, rxn, Pm, I, k_l_gsb, alpha, NO3, NH4, P, O2, R_no3, R_a, k_p_gsb,
         CHNOPS_kwargs={
             'max_growth_rate': mgr,
             'CHNOPS_forcing_parameters': {
-                'Phi': (Monod_gsb, ['NO3', 'NH4', 'P', 'H2S', 'R_no3', 'R_a', 'k_p_gsb', 'k_h2s_gsb']),
+                'Phi': (phi_gsb, ['NO3', 'NH4', 'P', 'H2S', 'R_no3', 'R_a', 'k_p_gsb', 'k_h2s_gsb']),
                 # 'Platt': (Platt_tanh, ['alpha', 'Pmax', 'I']),
                 'Light': (Monod, ['I', 'k_l_gsb']),
                 'Oxygen': (inhibition, ['O2', 'a_inh', 'O2_inh'])
             }, 
             'CHNOPS_F_attrs': {
-                'NO3': NO3,
-                'NH4': NH4,
-                'P': P,
-                'R_no3': R_no3,
-                'R_a': R_a,
-                'k_p_gsb': k_p_gsb,
-                'alpha': alpha,
-                'I': I,
-                'k_l_gsb': k_l_gsb,
                 'Pmax': Pm,
-                'H2S': H2S,
-                'k_h2s_gsb': k_h2s_gsb,
-                'a_inh': a_inh,
-                'O2': O2,
-                'O2_inh': O2_inh
+                'I': I, 'k_l_gsb': k_l_gsb,
+                'NO3': NO3, 'NH4': NH4, 'P': P, 'O2': O2, 'H2S': H2S,
+                'R_no3': R_no3, 'R_a': R_a,
+                'k_p_gsb': k_p_gsb, 'k_h2s_gsb': k_h2s_gsb,
+                'a_inh': a_inh, 'O2_inh': O2_inh
             }
         }
     )
@@ -390,8 +435,45 @@ def get_gsb(R, rxn, Pm, I, k_l_gsb, alpha, NO3, NH4, P, O2, R_no3, R_a, k_p_gsb,
     return _phototroph
 
 
-def get_opnf(R, rxn, Pm, I, I_opt, P, k_p_opnf, O2, a_inh, O2_inh, mmr, mgr, num=1e6, name='Nitrogen-Fixing Oxygenic Phototroph'):
+def get_opnf(R, rxn, Pm, I, I_opt, P, O2, k_p_opnf, a_inh, O2_inh, mmr, mgr, num=1e6, name='Nitrogen-Fixing Oxygenic Phototroph'):
+    """
+    Create a NutMEG.horde object representing nitrogen-fixing oxygenic phototrophs.
 
+    Parameters
+    ----------
+    R : NutMEG.reactor
+        reactor object hosting the organism
+    rxn : NutMEG.reaction
+        reaction object hosting the overall metabolic reaction
+    Pm : float
+        Platt fitting parameter which defines the maximum productivity in
+        mg C / mg Chl a / h (or commensurate with alpha)
+    I : float
+        Irradiance (µmol photons m⁻² s⁻¹)
+    I_opt : float
+        Optimal irradiance for nitrogen-fixing oxygenic phototrophs (µmol photons m⁻² s⁻¹)
+    P : float
+        Concentration of P (µM)
+    O2 : float
+        Concentration of O2 (µM)
+    k_p_opnf : float
+        Monod half-saturation constant of P uptake for a nitrogen-fixing oxygenic phototroph (µM)
+    a_inh : float
+        Inhibition constant
+    O2_inh : float
+        Inhibition constant for O2
+    mmr : float
+        Maximum metabolic rate (aka zeroth order rate constant k_max) (mol of reaction / s)
+    mgr : float
+        Maximum growth rate (aka mu_max) (/s)
+    num : float, optional
+        Number of organisms in the horde. Larger hordes will yield more precise
+        growth rates but risk consuming all resources in long time-steps.
+        Default 1e6 (per kg water)
+    name : str, optional
+        String identifier for this organism. Default 'Phototroph'
+    """
+    
     _phototroph = nm.horde(
         name, R, rxn, num,
         unit='cells',  # alternative units are not yet supported
@@ -413,14 +495,11 @@ def get_opnf(R, rxn, Pm, I, I_opt, P, k_p_opnf, O2, a_inh, O2_inh, mmr, mgr, num
                 'Oxygen': (inhibition, ['O2', 'a_inh', 'O2_inh'])
             },
             'CHNOPS_F_attrs': {
-                'P': P,
-                'k_p_opnf': k_p_opnf,
-                'I': I,
-                'I_opt': I_opt,
                 'Pmax': Pm,
-                'O2': O2,
-                'a_inh': a_inh,
-                'O2_inh': O2_inh
+                'I': I, 'I_opt': I_opt,
+                'P': P, 'O2': O2,
+                'k_p_opnf': k_p_opnf,
+                'a_inh': a_inh, 'O2_inh': O2_inh
             }
         }
     )
@@ -459,17 +538,22 @@ def main():
     
     # ratio between g of Chl a and g of cells.
     CChl_to_Cbm = 0.01 # 0.003 to 0.055 (Middelburg 2019)
-    Cbm_to_percell = 3e-13 # number of cells in 1g of biomass. Use nutmeg default (Higgins & Cockell 2020)
+    Cbm_to_percell = 3e-13 # number of g biomass in 1 cell. Use nutmeg default (Higgins & Cockell 2020)
     
     # Maximum metabolic and growth rates
     mmr = Pm * CChl_to_Cbm * Cbm_to_percell / (12*3600)  # mol CO2 / cell / s
     mgr = Pm * CChl_to_Cbm / 3600  # growth rate in /s
 
+    # Values from Matano Paper
+    mu_max_opnnf = 0.67 / 86400  # Maximum growth rate for non-nitrogen fixing oxygenic phototrophs (/s)
+    mu_max_gsb = 0.25 / 86400  # Maximum growth rate for green sulfur bacteria (/s)
+    mu_max_opnf = 0.23 / 86400  # Maximum growth rate for nitrogen-fixing oxygenic phototrophs (/s)
+
     R_no3 = 2.5  # Half-saturation constant for NO3 (μM)
     R_a = 2.5  # Half-saturation constant for NH4+ (μM)
     k_p_opnnf = 0.014 # Half-saturation constant for P in non-nitrogen fixing oxygenic phototrophs (μM)
     k_t = 0.0693 # Temperature dependence (°C^-1)
-    a_inh = 1e9 # Inhibition constant (mol/kg)^-1 (converted from 1e6 mmol/L^-1)
+    a_inh = 1e9 # Inhibition constant μM^-1 (converted from 1e6 mM^-1)
     H2S_inh = 1.0  # Inhibition constant for H2S (μM)
     k_l_opnnf = 100.0 # Light limitation constant for non-nitrogen fixing oxygenic phototrophs (μmol photons m⁻²) <- check units
 
@@ -492,7 +576,7 @@ def main():
     # ---- OPNNF ----
     # Irradiance forcing factor
     # F_E_opnnf = Platt_tanh(None, alpha, Pm, m_data['par'])
-    F_E_opnnf = Monod(None, m_data['par'], k_l_opnnf)
+    F_I_opnnf = Monod(None, m_data['par'], k_l_opnnf)
 
     # Phosphorus forcing factor
     F_P_opnnf = Monod(None, m_data['P'], k_p_opnnf)
@@ -502,7 +586,7 @@ def main():
 
     # ---- GSB ----
     # Irradiance forcing factor
-    F_E_gsb = Monod(None, m_data['par'], k_l_gsb)
+    F_I_gsb = Monod(None, m_data['par'], k_l_gsb)
 
     # Phosphorus forcing factor
     F_P_gsb = Monod(None, m_data['P'], k_p_gsb)
@@ -515,7 +599,7 @@ def main():
 
     # ---- OPNF ----
     # Irradiance forcing factor
-    F_E_opnf = light_opnf(None, m_data['par'], I_opt)
+    F_I_opnf = light_opnf(None, m_data['par'], I_opt)
 
     # Phosphorus forcing factor
     F_P_opnf = Monod(None, m_data['P'], k_p_opnf)
@@ -537,21 +621,21 @@ def main():
             
             # OPNNF
             try:
-                opnnf = get_opnnf(R, rxn, Pm, m_data['par'][i], k_l_opnnf, alpha, NO3_calc, NH4_calc, m_data['P'][i], R_no3, R_a, k_p_opnnf, H2S_calc, a_inh, H2S_inh, mmr, mgr * temperature_modifier(m_data['temp'][i], k_t))
+                opnnf = get_opnnf(R, rxn, Pm, m_data['par'][i], k_l_opnnf, alpha, NO3_calc, NH4_calc, m_data['P'][i], H2S_calc, R_no3, R_a, k_p_opnnf, a_inh, H2S_inh, mmr, mu_max_opnnf * temperature_modifier(m_data['temp'][i], k_t))
                 prod_opnnf[i] = get_phototroph_rate(opnnf)
             except:
                 prod_opnnf[i] = np.nan
             
             # GSB
             try:
-                gsb = get_gsb(R, rxn, Pm, m_data['par'][i], k_l_gsb, alpha, NO3_calc, NH4_calc, m_data['P'][i], m_data['O2'][i], R_no3, R_a, k_p_gsb, k_h2s_gsb, H2S_calc, a_inh, O2_inh, mmr, mgr * temperature_modifier(m_data['temp'][i], k_t))
+                gsb = get_gsb(R, rxn, Pm, m_data['par'][i], k_l_gsb, NO3_calc, NH4_calc, m_data['P'][i], m_data['O2'][i], H2S_calc, R_no3, R_a, k_p_gsb, k_h2s_gsb, a_inh, O2_inh, mmr, mu_max_gsb * temperature_modifier(m_data['temp'][i], k_t))
                 prod_gsb[i] = get_phototroph_rate(gsb)
             except:
                 prod_gsb[i] = np.nan
 
             # OPNF
             try:
-                opnf = get_opnf(R, rxn, Pm, m_data['par'][i], I_opt, m_data['P'][i], k_p_opnf, m_data['O2'][i], a_inh, O2_inh, mmr, mgr * temperature_modifier(m_data['temp'][i], k_t))
+                opnf = get_opnf(R, rxn, Pm, m_data['par'][i], I_opt, m_data['P'][i], m_data['O2'][i], k_p_opnf, a_inh, O2_inh, mmr, mu_max_opnf * temperature_modifier(m_data['temp'][i], k_t))
                 prod_opnf[i] = get_phototroph_rate(opnf)
             except Exception as e:
                 prod_opnf[i] = np.nan
@@ -573,7 +657,7 @@ def main():
     axes[0, 0].grid(True, alpha=0.3)
 
     # Row 1, Plot 2: OPNNF Forcing factors
-    axes[0, 1].plot(F_E_opnnf, m_data['depth'], label='F_I (irradiance)', linewidth=1, color='orange')
+    axes[0, 1].plot(F_I_opnnf, m_data['depth'], label='F_I (irradiance)', linewidth=1, color='orange')
     axes[0, 1].plot(F_N, m_data['depth'], label='β_t (nitrogen availability)', linewidth=1, color='blue')
     axes[0, 1].plot(F_P_opnnf, m_data['depth'], label='F_P (phosphorus availability)', linewidth=1, color='green')
     axes[0, 1].plot(F_S_inh_opnnf, m_data['depth'], label='F_S (sulfur inhibition)', linewidth=1, color='red')
@@ -587,7 +671,7 @@ def main():
     axes[0, 1].grid(True, alpha=0.3)
 
     # Row 1, Plot 3: GSB Forcing factors
-    axes[0, 2].plot(F_E_gsb, m_data['depth'], label='F_I (irradiance)', linewidth=1, color='orange')
+    axes[0, 2].plot(F_I_gsb, m_data['depth'], label='F_I (irradiance)', linewidth=1, color='orange')
     axes[0, 2].plot(F_N, m_data['depth'], label='β_t (total nitrogen availability)', linewidth=1, color='blue')
     axes[0, 2].plot(F_P_gsb, m_data['depth'], label='F_P (total phosphorus availability)', linewidth=1, color='green')
     axes[0, 2].plot(F_H2S_gsb, m_data['depth'], label='F_H2S (total sulfur availability)', linewidth=1, color='purple')
@@ -602,7 +686,7 @@ def main():
     axes[0, 2].grid(True, alpha=0.3)
 
     # Row 1, Plot 4: OPNF Forcing factors
-    axes[0, 3].plot(F_E_opnf, m_data['depth'], label='F_I (irradiance)', linewidth=1, color='orange')
+    axes[0, 3].plot(F_I_opnf, m_data['depth'], label='F_I (irradiance)', linewidth=1, color='orange')
     axes[0, 3].plot(F_P_opnf, m_data['depth'], label='F_P (total phosphorus availability)', linewidth=1, color='green')
     axes[0, 3].plot(F_O2_inh, m_data['depth'], label='F_O2 (O2 inhibition)', linewidth=1, color='red')
     axes[0, 3].invert_yaxis()

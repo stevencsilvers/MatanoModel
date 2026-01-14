@@ -145,9 +145,9 @@ def Monod_fixed(resp, N, KN):
         resp may be passed as None when calling outside a
         NutMEG.base_organism.respirator object
     N : float
-        Concentration of bioavailable N in mol/kg
+        Concentration of bioavailable N (mol/kg)
     KN : float
-        Monod half-saturation constant of N uptake in mol/kg
+        Monod half-saturation constant of N uptake (mol/kg)
     """
     return N / (N + KN)
 
@@ -173,9 +173,9 @@ def get_phototroph(R, rxn, Pm, I, alpha, N, K_N, mmr, mgr, num=1e6, name='Photot
         Platt fitting parameter which defines the slope of the P vs I curve
         at I=0.
     N : float
-        Concentration of bioavailable N in mol/kg
+        Concentration of bioavailable N (mol/kg)
     K_N : float
-        Monod half-saturation constant of N uptake in mol/kg
+        Monod half-saturation constant of N uptake (mol/kg)
     mmr : float
         Maximum metabolic rate (aka zeroth order rate constant k_max) in
         mol of reaction / s.
