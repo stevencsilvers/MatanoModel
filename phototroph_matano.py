@@ -15,14 +15,18 @@ import NutMEG as nm
 ssl._create_default_https_context = ssl._create_unverified_context
 
 
-def load_matano_data(url, interpolate=False):
+def load_lake_data(url, max_depth, vertical_resolution, interpolate=False):
     """
-    Load Lake Matano data from Google Sheets in long format.
+    Load Lake Lake data from Google Sheets in long format.
 
     Parameters
     ----------
     url : str
         URL of the CSV containing the following columns: parameter, depth_m, value, unit, year, month, source
+    max_depth : float
+        Maximum depth of lake data (m).
+    vertical_resolution : float
+        Vertical resolution for the data grid (m).
     interpolate : bool, optional
         If True, interpolate data to a 1 m grid from 0 to 550 m.
         If False, return data on 0-550 m grid with NaN for unmeasured depths.
@@ -50,8 +54,8 @@ def load_matano_data(url, interpolate=False):
         'O2': 2004 # September
     }
 
-    # Create depth grid (every 1 meter from 0 to 550)
-    depths = np.arange(0, 551, 1)
+    # Create depth grid
+    depths = np.linspace(0, max_depth, int(max_depth / vertical_resolution) + 1)
     data = {'depth': depths}
 
     for param, year in params.items():
@@ -81,7 +85,7 @@ def load_matano_data(url, interpolate=False):
                 # Place measured values on grid, leave NaN for unmeasured depths
                 values = np.full(len(depths), np.nan)
                 for _, row in param_data.iterrows():
-                    depth_idx = int(row['depth_m'])
+                    depth_idx = int(round(row['depth_m'] / vertical_resolution))
                     if 0 <= depth_idx < len(depths):
                         values[depth_idx] = row['value']
             
@@ -288,6 +292,7 @@ def temperature_modifier(t, k_t):
 def light_opnf(resp, I, I_opt):
     """
     Forcing function for light limitation in nitrogen-fixing oxygenic phototrophs.
+    Matano paper page 41, equation 3
 
     Parameters
     ----------
@@ -298,6 +303,8 @@ def light_opnf(resp, I, I_opt):
     I_opt : float
         Optimal irradiance (µmol photons m⁻² s⁻¹)
     """
+    if I == 0:
+        return 0.0
     return (I_opt / I) * np.exp(1 - (I_opt / I))
 
 
@@ -565,15 +572,18 @@ def get_phototroph_rate(_phototroph, stepsize=600):
 
 
 def main():
-    # Load Lake Matano data from Google Sheets
+    # Load Lake Lake data from Google Sheets
     url = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTgMvmTJ9LGCeC6vAJyHyh-X6fL3AHzKY9R0PuJLdTMGTE1qq7ZChWN2VL6qrtD8ib1r5l2UQyj6phf/pub?gid=1636861519&single=true&output=csv'
-    
-    print("Loading Lake Matano data...")
-    m_raw = load_matano_data(url, interpolate=False) # Matano raw data at measured depths
-    m_data = load_matano_data(url, interpolate=True) # Matano data interpolated to 1 m grid
+    max_depth = 550 # Maximum depth of lake data
+    vertical_resolution = 1.0 # Data grid spacing between depths. All data points must be at depths which are multiples of this value.
+    max_graphing_depth = 200 # Maximum depth to graph
+
+    print("Loading Lake data...")
+    m_raw = load_lake_data(url, max_depth, vertical_resolution, interpolate=False) # Lake raw data at measured depths
+    m_data = load_lake_data(url, max_depth, vertical_resolution, interpolate=True) # Lake data interpolated to grid of specified resolution
 
     # Set up reactor
-    R = nm.reactor('Matano_reactor', workoutID=False, pH=7.0)
+    R = nm.reactor('Lake_reactor', workoutID=False, pH=7.0)
     R, rxn = initial_conditions(R)
     rxn.update_molar_gibbs_from_quotient()
     print(r'ΔG =', rxn.molar_gibbs, 'J/mol')
@@ -646,7 +656,9 @@ def main():
 
     # ---- OPNF ----
     # Irradiance forcing factor
-    F_I_opnf = light_opnf(None, m_data['par'], I_opt)
+    F_I_opnf = []
+    for I in m_data['par']:
+        F_I_opnf.append(light_opnf(None, I, I_opt))
 
     # Phosphorus forcing factor
     F_P_opnf = Monod(None, m_data['P'], k_p_opnf)
@@ -695,7 +707,7 @@ def main():
     axes[0, 0].plot(prod_gsb*1e6, m_data['depth'], label='Green Sulfur Bacteria', color='green', linewidth=1)
     axes[0, 0].plot(prod_opnf*1e6, m_data['depth'], label='Nitrogen-Fixing Oxygenic Phototrophs', color='blue', linewidth=1)
     axes[0, 0].invert_yaxis()
-    axes[0, 0].set_ylim(200, 0)
+    axes[0, 0].set_ylim(max_graphing_depth, 0)
     axes[0, 0].set_xlabel('Growth Rate (×10⁶ s⁻¹)', fontsize=10)
     axes[0, 0].set_ylabel('Depth (m)', fontsize=10)
     axes[0, 0].tick_params(axis='both', labelsize=8)
@@ -710,7 +722,7 @@ def main():
     axes[0, 1].plot(F_S_inh_opnnf, m_data['depth'], label='F_S (sulfur inhibition)', linewidth=1, color='red')
     axes[0, 1].invert_yaxis()
     axes[0, 1].set_xlim(-0.03, 1.03)
-    axes[0, 1].set_ylim(200, 0)
+    axes[0, 1].set_ylim(max_graphing_depth, 0)
     axes[0, 1].set_xlabel('Forcing Factor', fontsize=10)
     axes[0, 1].tick_params(axis='both', labelsize=8)
     axes[0, 1].set_title('OPNNF Forcing Factors', fontsize=13, fontweight='bold')
@@ -725,7 +737,7 @@ def main():
     axes[0, 2].plot(F_O2_inh, m_data['depth'], label='F_O2 (O2 inhibition)', linewidth=1, color='red')
     axes[0, 2].invert_yaxis()
     axes[0, 2].set_xlim(-0.03, 1.03)
-    axes[0, 2].set_ylim(200, 0)
+    axes[0, 2].set_ylim(max_graphing_depth, 0)
     axes[0, 2].set_xlabel('Forcing Factor', fontsize=10)
     axes[0, 2].set_title('GSB Forcing Factors', fontsize=13, fontweight='bold')
     axes[0, 2].tick_params(axis='both', labelsize=8)
@@ -738,7 +750,7 @@ def main():
     axes[0, 3].plot(F_O2_inh, m_data['depth'], label='F_O2 (O2 inhibition)', linewidth=1, color='red')
     axes[0, 3].invert_yaxis()
     axes[0, 3].set_xlim(-0.03, 1.03)
-    axes[0, 3].set_ylim(200, 0)
+    axes[0, 3].set_ylim(max_graphing_depth, 0)
     axes[0, 3].set_xlabel('Forcing Factor', fontsize=10)
     axes[0, 3].set_title('OPNF Forcing Factors', fontsize=13, fontweight='bold')
     axes[0, 3].tick_params(axis='both', labelsize=8)
@@ -749,7 +761,7 @@ def main():
     axes[1, 0].scatter(m_raw['par'], m_raw['depth'], color='none', edgecolors='orange', s=15, marker='o')
     axes[1, 0].invert_yaxis()
     axes[1, 0].set_xscale('log')
-    axes[1, 0].set_ylim(200, 0)
+    axes[1, 0].set_ylim(max_graphing_depth, 0)
     axes[1, 0].set_xlabel('PAR (μmol photons m⁻² s⁻¹)', fontsize=10)
     axes[1, 0].set_ylabel('Depth (m)', fontsize=10)
     axes[1, 0].set_title('Light Extinction', fontsize=13, fontweight='bold')
@@ -762,7 +774,7 @@ def main():
     axes[1, 1].scatter(m_raw['P'] * 100, m_raw['depth'], label='P (μM) ×100', color='none', edgecolors='blue', s=25, marker='P')
     axes[1, 1].invert_yaxis()
     axes[1, 1].set_xlim(0, 650)
-    axes[1, 1].set_ylim(200, 0)
+    axes[1, 1].set_ylim(max_graphing_depth, 0)
     axes[1, 1].set_title('Chemical Species', fontsize=13, fontweight='bold')
     axes[1, 1].set_xlabel('Concentration (μM)', fontsize=10)
     axes[1, 1].tick_params(axis='both', labelsize=8)
@@ -775,7 +787,7 @@ def main():
     axes[1, 2].scatter(m_raw['O2'], m_raw['depth'], label='O₂ (μM)', color='none', edgecolors='chocolate', s=25, marker='P')
     axes[1, 2].invert_yaxis()
     axes[1, 2].set_xlim(0, 400)
-    axes[1, 2].set_ylim(200, 0)
+    axes[1, 2].set_ylim(max_graphing_depth, 0)
     axes[1, 2].set_title('Chemical Species', fontsize=13, fontweight='bold')
     axes[1, 2].set_xlabel('Concentration (μM)', fontsize=10)
     axes[1, 2].tick_params(axis='both', labelsize=8)
