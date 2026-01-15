@@ -22,7 +22,7 @@ def load_matano_data(url, interpolate=False):
     Parameters
     ----------
     url : str
-        URL of the CSV containing the following columns: parameter, depth_m, value, unit, year, month
+        URL of the CSV containing the following columns: parameter, depth_m, value, unit, year, month, source
     interpolate : bool, optional
         If True, interpolate data to a 1 m grid from 0 to 550 m.
         If False, return data on 0-550 m grid with NaN for unmeasured depths.
@@ -34,27 +34,20 @@ def load_matano_data(url, interpolate=False):
     """
     df_long = pd.read_csv(url)
 
-    # TEST: Add row with H2S
-    df_long = pd.concat([df_long, pd.DataFrame([{'parameter': 'H2S', 'depth_m': 0, 'value': 0}])], ignore_index=True)
-    df_long = pd.concat([df_long, pd.DataFrame([{'parameter': 'H2S', 'depth_m': 100, 'value': 0}])], ignore_index=True)
-    # Change first two NO3 data points
-    # df_long.loc[(df_long['parameter'] == 'NO3') & (df_long['depth_m'] == 9), 'value'] = 0.0
-    # df_long.loc[(df_long['parameter'] == 'NO3') & (df_long['depth_m'] == 20), 'value'] = 0.0
-
     # TEST change P concentration to 0 at DL instead of 0.025
     df_long.loc[(df_long['parameter'] == 'P') & (df_long['value'] == 0.025), 'value'] = 0.05
 
-    # Parameters we want to extract, mapped to their specific years
+    # Parameters we want to extract and from which years
     # Empty string '' means no year value (NaN in the 'year' column)
     params = {
-        'NH4': 2007,
-        'NO3': 2010,
-        'P': 2005,
-        'par': 2007,
-        'temp': 2004,
-        'H2S': '',
-        'SO4': '',
-        'O2': 2004
+        'NH4': 2007, # February
+        'NO3': 2010, # May
+        'P': 2005, # July
+        'par': 2007, # February
+        'temp': 2004, # September
+        'H2S': 2007, # February
+        'SO4': 2007, # February
+        'O2': 2004 # September
     }
 
     # Create depth grid (every 1 meter from 0 to 550)
@@ -598,7 +591,7 @@ def main():
     mmr = Pm * CChl_to_Cbm * Cbm_to_percell / (12*3600)  # mol CO2 / cell / s
     mgr = Pm * CChl_to_Cbm / 3600  # growth rate in /s
 
-    # Values from Matano Paper
+    # Values from Matano paper
     mu_max_opnnf = 0.67 / 86400  # Maximum growth rate for non-nitrogen fixing oxygenic phototrophs (/s)
     mu_max_gsb = 0.25 / 86400  # Maximum growth rate for green sulfur bacteria (/s)
     mu_max_opnf = 0.23 / 86400  # Maximum growth rate for nitrogen-fixing oxygenic phototrophs (/s)
@@ -627,9 +620,12 @@ def main():
     F_N = Monod_nitrogen(NO3_no_nan, NH4_no_nan, R_no3, R_a)
     F_N[np.isnan(m_data['NO3']) & np.isnan(m_data['NH4'])] = np.nan  # hide depths with no N data at all
 
+    # Oxygen inhibition forcing factor
+    F_O2_inh = inhibition(None, np.nan_to_num(m_data['O2'], nan=0.0), a_inh, O2_inh)
+
     # ---- OPNNF ----
     # Irradiance forcing factor
-    # F_E_opnnf = Platt_tanh(None, alpha, Pm, m_data['par'])
+    # F_I_opnnf = Platt_tanh(None, alpha, Pm, m_data['par'])
     F_I_opnnf = Monod(None, m_data['par'], k_l_opnnf)
 
     # Phosphorus forcing factor
@@ -648,9 +644,6 @@ def main():
     # Sulfur forcing factor
     F_H2S_gsb = Monod(None, m_data['H2S'], k_h2s_gsb)
 
-    # Oxygen inhibition forcing factor
-    F_O2_inh = inhibition(None, np.nan_to_num(m_data['O2'], nan=0.0), a_inh, O2_inh)
-
     # ---- OPNF ----
     # Irradiance forcing factor
     F_I_opnf = light_opnf(None, m_data['par'], I_opt)
@@ -659,7 +652,7 @@ def main():
     F_P_opnf = Monod(None, m_data['P'], k_p_opnf)
 
     
-    # Calculate phototroph growth rates (where we have nitrogen data)
+    # Calculate phototroph growth rates (where nitrogen data exists)
     print("Calculating growth rates...")
     prod_opnnf = np.full(len(m_data['depth']), np.nan)
     prod_gsb = np.full(len(m_data['depth']), np.nan)
