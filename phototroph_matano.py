@@ -15,14 +15,18 @@ import NutMEG as nm
 ssl._create_default_https_context = ssl._create_unverified_context
 
 
-def load_lake_data(url, max_depth, vertical_resolution, interpolate=False):
+def load_lake_data(url, params, max_depth, vertical_resolution, interpolate=False):
     """
     Load Lake Lake data from Google Sheets in long format.
 
     Parameters
     ----------
     url : str
-        URL of the CSV containing the following columns: parameter, depth_m, value, unit, year, month, source
+    URL of the CSV containing the following columns: parameter, depth_m, value, unit, year, month, source
+    parameter : dict
+        Dictionary specifying the parameters to extract and their corresponding
+        (year, month) tuples for filtering. Use empty string '' for year or month
+        to indicate "any".
     max_depth : float
         Maximum depth of lake data (m).
     vertical_resolution : float
@@ -39,35 +43,28 @@ def load_lake_data(url, max_depth, vertical_resolution, interpolate=False):
     df_long = pd.read_csv(url)
 
     # TEST change P concentration to 0 at DL instead of 0.025
-    df_long.loc[(df_long['parameter'] == 'P') & (df_long['value'] == 0.025), 'value'] = 0.05
+    # df_long.loc[(df_long['parameter'] == 'P') & (df_long['value'] == 0.025), 'value'] = 0.05
 
-    # Parameters we want to extract and from which years
-    # Empty string '' means no year value (NaN in the 'year' column)
-    params = {
-        'NH4': 2007, # February
-        'NO3': 2010, # May
-        'P': 2005, # July
-        'par': 2007, # February
-        'temp': 2004, # September
-        'H2S': 2007, # February
-        'SO4': 2007, # February
-        'O2': 2004 # September
-    }
 
     # Create depth grid
     depths = np.linspace(0, max_depth, int(max_depth / vertical_resolution) + 1)
     data = {'depth': depths}
 
-    for param, year in params.items():
+    for param, ym in params.items():
+        if not isinstance(ym, (list, tuple)) or len(ym) != 2:
+            raise ValueError("Each params entry must be a (year, month) pair")
+
+        year, month = ym
         # Filter data for this parameter and its specific year
         param_data = df_long[df_long['parameter'] == param].copy()
         
-        if year == '':
-            # Empty string means look for rows where year is NaN
-            param_data = param_data[param_data['year'].isna()]
-        else:
-            # Filter for the specific year
+        if year != '':
+            # Filter for a specific year when provided
             param_data = param_data[param_data['year'] == year]
+
+        if month != '':
+            # Filter for a specific month when provided
+            param_data = param_data[param_data['month'] == month]
         
         param_data = param_data.sort_values('depth_m')
 
@@ -90,8 +87,18 @@ def load_lake_data(url, max_depth, vertical_resolution, interpolate=False):
                         values[depth_idx] = row['value']
             
             data[param] = values
-        else:
-            data[param] = np.full(len(depths), np.nan)
+        else: # No data found for this parameter in year/month
+            if month != '' and year != '':
+                missing_desc = f"from {month} {year}"
+            elif month != '' and year == '':
+                missing_desc = f"from {month} (any year)"
+            elif month == '' and year != '':
+                missing_desc = f"from any month {year}"
+            else:
+                missing_desc = "from any month any year"
+
+            print(f"load_lake_data(): Couldn't find {param} data {missing_desc}")
+            return {}
 
     return data
 
@@ -572,15 +579,71 @@ def get_phototroph_rate(_phototroph, stepsize=600):
 
 
 def main():
-    # Load Lake Lake data from Google Sheets
-    url = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTgMvmTJ9LGCeC6vAJyHyh-X6fL3AHzKY9R0PuJLdTMGTE1qq7ZChWN2VL6qrtD8ib1r5l2UQyj6phf/pub?gid=1636861519&single=true&output=csv'
-    max_depth = 550 # Maximum depth of lake data
-    vertical_resolution = 1.0 # Data grid spacing between depths. All data points must be at depths which are multiples of this value.
-    max_graphing_depth = 200 # Maximum depth to graph
+    # lake = 'matano'
+    lake = 'cadagno'
 
+    # Load Lake Lake data from Google Sheets
+    matano_url = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTgMvmTJ9LGCeC6vAJyHyh-X6fL3AHzKY9R0PuJLdTMGTE1qq7ZChWN2VL6qrtD8ib1r5l2UQyj6phf/pub?gid=1636861519&single=true&output=csv'
+    matano_max_depth = 550 # Maximum depth of lake data
+    matano_vertical_resolution = 1.0 # Data grid spacing between depths. All data points must be at depths which are multiples of this value.
+    matano_max_graphing_depth = 200 # Maximum depth to graph
+
+    matano_params = {
+        'NH4': (2007, 'february'),
+        'NO3': (2010, 'may'),
+        'P': (2005, 'july'),
+        'par': (2007, 'february'),
+        'temp': (2004, 'september'),
+        'H2S': (2007, 'february'),
+        'O2': (2004, 'september')
+    }
+
+    cadagno_url = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTgMvmTJ9LGCeC6vAJyHyh-X6fL3AHzKY9R0PuJLdTMGTE1qq7ZChWN2VL6qrtD8ib1r5l2UQyj6phf/pub?gid=896988264&single=true&output=csv'
+    cadagno_max_depth = 20 # Maximum depth of lake data
+    cadagno_vertical_resolution = 0.1 # Data grid spacing between depths. All data points must be at depths which are multiples of this value.
+    cadagno_max_graphing_depth = 20 # Maximum depth to graph
+
+    cadagno_params = {
+        'NH4': (1999, 'august'),
+        'NO3': (1999, 'august'),
+        'P': (1999, 'august'),
+        'par': (1999, 'august'),
+        'temp': (1999, 'august'),
+        'H2S': (1999, ''),
+        'O2': (1999, 'august')
+    }
+
+    # cadagno_params = {
+    #     'NH4': (1999, 'september'),
+    #     'NO3': (1999, 'september'),
+    #     'P': (1999, 'september'),
+    #     'par': (1999, 'september'),
+    #     'temp': (1999, 'september'),
+    #     'H2S': (1999, ''),
+    #     'O2': (1999, 'september')
+    # }
+
+    if lake == 'matano':
+        url = matano_url
+        params = matano_params
+        max_depth = matano_max_depth
+        vertical_resolution = matano_vertical_resolution
+        max_graphing_depth = matano_max_graphing_depth
+    elif lake == 'cadagno':
+        url = cadagno_url
+        params = cadagno_params
+        max_depth = cadagno_max_depth
+        vertical_resolution = cadagno_vertical_resolution
+        max_graphing_depth = cadagno_max_graphing_depth
+    
+    
     print("Loading Lake data...")
-    m_raw = load_lake_data(url, max_depth, vertical_resolution, interpolate=False) # Lake raw data at measured depths
-    m_data = load_lake_data(url, max_depth, vertical_resolution, interpolate=True) # Lake data interpolated to grid of specified resolution
+    raw = load_lake_data(url, params, max_depth, vertical_resolution, interpolate=False) # Lake raw data at measured depths
+
+    if raw == {}: # Quit if load_lake_data can't load all parameters
+        return
+
+    data = load_lake_data(url, params, max_depth, vertical_resolution, interpolate=True) # Lake data interpolated to grid of specified resolution
 
     # Set up reactor
     R = nm.reactor('Lake_reactor', workoutID=False, pH=7.0)
@@ -625,76 +688,76 @@ def main():
     # Calculate forcing factors for graphing
 
     # Nitrogen forcing factor (β_t)
-    NO3_no_nan = np.nan_to_num(m_data['NO3'], nan=0.0)
-    NH4_no_nan = np.nan_to_num(m_data['NH4'], nan=0.0) 
+    NO3_no_nan = np.nan_to_num(data['NO3'], nan=0.0)
+    NH4_no_nan = np.nan_to_num(data['NH4'], nan=0.0) 
     F_N = Monod_nitrogen(NO3_no_nan, NH4_no_nan, R_no3, R_a)
-    F_N[np.isnan(m_data['NO3']) & np.isnan(m_data['NH4'])] = np.nan  # hide depths with no N data at all
+    F_N[np.isnan(data['NO3']) & np.isnan(data['NH4'])] = np.nan  # hide depths with no N data at all
 
     # Oxygen inhibition forcing factor
-    F_O2_inh = inhibition(None, np.nan_to_num(m_data['O2'], nan=0.0), a_inh, O2_inh)
+    F_O2_inh = inhibition(None, np.nan_to_num(data['O2'], nan=0.0), a_inh, O2_inh)
 
     # ---- OPNNF ----
     # Irradiance forcing factor
-    # F_I_opnnf = Platt_tanh(None, alpha, Pm, m_data['par'])
-    F_I_opnnf = Monod(None, m_data['par'], k_l_opnnf)
+    # F_I_opnnf = Platt_tanh(None, alpha, Pm, data['par'])
+    F_I_opnnf = Monod(None, data['par'], k_l_opnnf)
 
     # Phosphorus forcing factor
-    F_P_opnnf = Monod(None, m_data['P'], k_p_opnnf)
+    F_P_opnnf = Monod(None, data['P'], k_p_opnnf)
 
     # Sulfur inhibition forcing factor
-    F_S_inh_opnnf = inhibition(None, np.nan_to_num(m_data['H2S'], nan=0.0), a_inh, H2S_inh)
+    F_S_inh_opnnf = inhibition(None, np.nan_to_num(data['H2S'], nan=0.0), a_inh, H2S_inh)
 
     # ---- GSB ----
     # Irradiance forcing factor
-    F_I_gsb = Monod(None, m_data['par'], k_l_gsb)
+    F_I_gsb = Monod(None, data['par'], k_l_gsb)
 
     # Phosphorus forcing factor
-    F_P_gsb = Monod(None, m_data['P'], k_p_gsb)
+    F_P_gsb = Monod(None, data['P'], k_p_gsb)
 
     # Sulfur forcing factor
-    F_H2S_gsb = Monod(None, m_data['H2S'], k_h2s_gsb)
+    F_H2S_gsb = Monod(None, data['H2S'], k_h2s_gsb)
 
     # ---- OPNF ----
     # Irradiance forcing factor
     F_I_opnf = []
-    for I in m_data['par']:
+    for I in data['par']:
         F_I_opnf.append(light_opnf(None, I, I_opt))
 
     # Phosphorus forcing factor
-    F_P_opnf = Monod(None, m_data['P'], k_p_opnf)
+    F_P_opnf = Monod(None, data['P'], k_p_opnf)
 
     
     # Calculate phototroph growth rates (where nitrogen data exists)
     print("Calculating growth rates...")
-    prod_opnnf = np.full(len(m_data['depth']), np.nan)
-    prod_gsb = np.full(len(m_data['depth']), np.nan)
-    prod_opnf = np.full(len(m_data['depth']), np.nan)
+    prod_opnnf = np.full(len(data['depth']), np.nan)
+    prod_gsb = np.full(len(data['depth']), np.nan)
+    prod_opnf = np.full(len(data['depth']), np.nan)
     
-    for i in range(len(m_data['depth'])):
+    for i in range(len(data['depth'])):
         # Only calculate if we have at least one nitrogen source
-        if not (np.isnan(m_data['NO3'][i]) and np.isnan(m_data['NH4'][i])):
+        if not (np.isnan(data['NO3'][i]) and np.isnan(data['NH4'][i])):
             # Replace NaN with 0 for calculation
-            NO3_calc = 0 if np.isnan(m_data['NO3'][i]) else m_data['NO3'][i]
-            NH4_calc = 0 if np.isnan(m_data['NH4'][i]) else m_data['NH4'][i]
-            H2S_calc = 0 if np.isnan(m_data['H2S'][i]) else m_data['H2S'][i]
+            NO3_calc = 0 if np.isnan(data['NO3'][i]) else data['NO3'][i]
+            NH4_calc = 0 if np.isnan(data['NH4'][i]) else data['NH4'][i]
+            H2S_calc = 0 if np.isnan(data['H2S'][i]) else data['H2S'][i]
             
             # OPNNF
             try:
-                opnnf = get_opnnf(R, rxn, Pm, m_data['par'][i], k_l_opnnf, alpha, NO3_calc, NH4_calc, m_data['P'][i], H2S_calc, R_no3, R_a, k_p_opnnf, a_inh, H2S_inh, mmr, mu_max_opnnf * temperature_modifier(m_data['temp'][i], k_t))
+                opnnf = get_opnnf(R, rxn, Pm, data['par'][i], k_l_opnnf, alpha, NO3_calc, NH4_calc, data['P'][i], H2S_calc, R_no3, R_a, k_p_opnnf, a_inh, H2S_inh, mmr, mu_max_opnnf * temperature_modifier(data['temp'][i], k_t))
                 prod_opnnf[i] = get_phototroph_rate(opnnf)
             except:
                 prod_opnnf[i] = np.nan
             
             # GSB
             try:
-                gsb = get_gsb(R, rxn, Pm, m_data['par'][i], k_l_gsb, NO3_calc, NH4_calc, m_data['P'][i], m_data['O2'][i], H2S_calc, R_no3, R_a, k_p_gsb, k_h2s_gsb, a_inh, O2_inh, mmr, mu_max_gsb * temperature_modifier(m_data['temp'][i], k_t))
+                gsb = get_gsb(R, rxn, Pm, data['par'][i], k_l_gsb, NO3_calc, NH4_calc, data['P'][i], data['O2'][i], H2S_calc, R_no3, R_a, k_p_gsb, k_h2s_gsb, a_inh, O2_inh, mmr, mu_max_gsb * temperature_modifier(data['temp'][i], k_t))
                 prod_gsb[i] = get_phototroph_rate(gsb)
             except:
                 prod_gsb[i] = np.nan
 
             # OPNF
             try:
-                opnf = get_opnf(R, rxn, Pm, m_data['par'][i], I_opt, m_data['P'][i], m_data['O2'][i], k_p_opnf, a_inh, O2_inh, mmr, mu_max_opnf * temperature_modifier(m_data['temp'][i], k_t))
+                opnf = get_opnf(R, rxn, Pm, data['par'][i], I_opt, data['P'][i], data['O2'][i], k_p_opnf, a_inh, O2_inh, mmr, mu_max_opnf * temperature_modifier(data['temp'][i], k_t))
                 prod_opnf[i] = get_phototroph_rate(opnf)
             except Exception as e:
                 prod_opnf[i] = np.nan
@@ -703,9 +766,9 @@ def main():
     fig, axes = plt.subplots(2, 4, figsize=(12, 8))
     
     # Row 1, Plot 1: Growth rate
-    axes[0, 0].plot(prod_opnnf*1e6, m_data['depth'], label='Non-Nitrogen Fixing Oxygenic Phototrophs', color='red', linewidth=1)
-    axes[0, 0].plot(prod_gsb*1e6, m_data['depth'], label='Green Sulfur Bacteria', color='green', linewidth=1)
-    axes[0, 0].plot(prod_opnf*1e6, m_data['depth'], label='Nitrogen-Fixing Oxygenic Phototrophs', color='blue', linewidth=1)
+    axes[0, 0].plot(prod_opnnf*1e6, data['depth'], label='Non-Nitrogen Fixing Oxygenic Phototrophs', color='red', linewidth=1)
+    axes[0, 0].plot(prod_gsb*1e6, data['depth'], label='Green Sulfur Bacteria', color='green', linewidth=1)
+    axes[0, 0].plot(prod_opnf*1e6, data['depth'], label='Nitrogen-Fixing Oxygenic Phototrophs', color='blue', linewidth=1)
     axes[0, 0].invert_yaxis()
     axes[0, 0].set_ylim(max_graphing_depth, 0)
     axes[0, 0].set_xlabel('Growth Rate (×10⁶ s⁻¹)', fontsize=10)
@@ -716,10 +779,10 @@ def main():
     axes[0, 0].grid(True, alpha=0.3)
 
     # Row 1, Plot 2: OPNNF Forcing factors
-    axes[0, 1].plot(F_I_opnnf, m_data['depth'], label='F_I (irradiance)', linewidth=1, color='orange')
-    axes[0, 1].plot(F_N, m_data['depth'], label='β_t (nitrogen availability)', linewidth=1, color='blue')
-    axes[0, 1].plot(F_P_opnnf, m_data['depth'], label='F_P (phosphorus availability)', linewidth=1, color='green')
-    axes[0, 1].plot(F_S_inh_opnnf, m_data['depth'], label='F_S (sulfur inhibition)', linewidth=1, color='red')
+    axes[0, 1].plot(F_I_opnnf, data['depth'], label='F_I (irradiance)', linewidth=1, color='orange')
+    axes[0, 1].plot(F_N, data['depth'], label='β_t (nitrogen availability)', linewidth=1, color='blue')
+    axes[0, 1].plot(F_P_opnnf, data['depth'], label='F_P (phosphorus availability)', linewidth=1, color='green')
+    axes[0, 1].plot(F_S_inh_opnnf, data['depth'], label='F_S (sulfur inhibition)', linewidth=1, color='red')
     axes[0, 1].invert_yaxis()
     axes[0, 1].set_xlim(-0.03, 1.03)
     axes[0, 1].set_ylim(max_graphing_depth, 0)
@@ -730,11 +793,11 @@ def main():
     axes[0, 1].grid(True, alpha=0.3)
 
     # Row 1, Plot 3: GSB Forcing factors
-    axes[0, 2].plot(F_I_gsb, m_data['depth'], label='F_I (irradiance)', linewidth=1, color='orange')
-    axes[0, 2].plot(F_N, m_data['depth'], label='β_t (total nitrogen availability)', linewidth=1, color='blue')
-    axes[0, 2].plot(F_P_gsb, m_data['depth'], label='F_P (total phosphorus availability)', linewidth=1, color='green')
-    axes[0, 2].plot(F_H2S_gsb, m_data['depth'], label='F_H2S (total sulfur availability)', linewidth=1, color='purple')
-    axes[0, 2].plot(F_O2_inh, m_data['depth'], label='F_O2 (O2 inhibition)', linewidth=1, color='red')
+    axes[0, 2].plot(F_I_gsb, data['depth'], label='F_I (irradiance)', linewidth=1, color='orange')
+    axes[0, 2].plot(F_N, data['depth'], label='β_t (total nitrogen availability)', linewidth=1, color='blue')
+    axes[0, 2].plot(F_P_gsb, data['depth'], label='F_P (total phosphorus availability)', linewidth=1, color='green')
+    axes[0, 2].plot(F_H2S_gsb, data['depth'], label='F_H2S (total sulfur availability)', linewidth=1, color='purple')
+    axes[0, 2].plot(F_O2_inh, data['depth'], label='F_O2 (O2 inhibition)', linewidth=1, color='red')
     axes[0, 2].invert_yaxis()
     axes[0, 2].set_xlim(-0.03, 1.03)
     axes[0, 2].set_ylim(max_graphing_depth, 0)
@@ -745,9 +808,9 @@ def main():
     axes[0, 2].grid(True, alpha=0.3)
 
     # Row 1, Plot 4: OPNF Forcing factors
-    axes[0, 3].plot(F_I_opnf, m_data['depth'], label='F_I (irradiance)', linewidth=1, color='orange')
-    axes[0, 3].plot(F_P_opnf, m_data['depth'], label='F_P (total phosphorus availability)', linewidth=1, color='green')
-    axes[0, 3].plot(F_O2_inh, m_data['depth'], label='F_O2 (O2 inhibition)', linewidth=1, color='red')
+    axes[0, 3].plot(F_I_opnf, data['depth'], label='F_I (irradiance)', linewidth=1, color='orange')
+    axes[0, 3].plot(F_P_opnf, data['depth'], label='F_P (total phosphorus availability)', linewidth=1, color='green')
+    axes[0, 3].plot(F_O2_inh, data['depth'], label='F_O2 (O2 inhibition)', linewidth=1, color='red')
     axes[0, 3].invert_yaxis()
     axes[0, 3].set_xlim(-0.03, 1.03)
     axes[0, 3].set_ylim(max_graphing_depth, 0)
@@ -758,7 +821,7 @@ def main():
     axes[0, 3].grid(True, alpha=0.3)
     
     # Row 2, Plot 1: PAR vs depth
-    axes[1, 0].scatter(m_raw['par'], m_raw['depth'], color='none', edgecolors='orange', s=15, marker='o')
+    axes[1, 0].scatter(raw['par'], raw['depth'], color='none', edgecolors='orange', s=15, marker='o')
     axes[1, 0].invert_yaxis()
     axes[1, 0].set_xscale('log')
     axes[1, 0].set_ylim(max_graphing_depth, 0)
@@ -769,11 +832,14 @@ def main():
     axes[1, 0].grid(True, alpha=0.3)
 
     # Row 2, Plot 2: Chemical species concentrations (NO3, NH4, P)
-    axes[1, 1].scatter(m_raw['NO3'] * 100, m_raw['depth'], label='NO₃⁻ (μM) ×100', color='none', edgecolors='red', s=25, marker='D')
-    axes[1, 1].scatter(m_raw['NH4'], m_raw['depth'], label='NH₄⁺ (μM)', color='none', edgecolors='mediumorchid', s=25, marker='o')
-    axes[1, 1].scatter(m_raw['P'] * 100, m_raw['depth'], label='P (μM) ×100', color='none', edgecolors='blue', s=25, marker='P')
+    # axes[1, 1].scatter(raw['NO3'] * 100, raw['depth'], label='NO₃⁻ (μM) ×100', color='none', edgecolors='red', s=25, marker='D')
+    axes[1, 1].scatter(raw['NH4'], raw['depth'], label='NH₄⁺ (μM)', color='none', edgecolors='mediumorchid', s=25, marker='o')
+    # axes[1, 1].scatter(raw['P'] * 100, raw['depth'], label='P (μM) ×100', color='none', edgecolors='blue', s=25, marker='P')
+    axes[1, 1].scatter(raw['NO3'], raw['depth'], label='NO₃⁻ (μM)', color='none', edgecolors='red', s=25, marker='D')
+    axes[1, 1].scatter(raw['P'], raw['depth'], label='P (μM)', color='none', edgecolors='blue', s=25, marker='P')
     axes[1, 1].invert_yaxis()
-    axes[1, 1].set_xlim(0, 650)
+    # axes[1, 1].set_xlim(0, 650)
+    axes[1, 1].set_xlim(0, 20)
     axes[1, 1].set_ylim(max_graphing_depth, 0)
     axes[1, 1].set_title('Chemical Species', fontsize=13, fontweight='bold')
     axes[1, 1].set_xlabel('Concentration (μM)', fontsize=10)
@@ -781,12 +847,13 @@ def main():
     axes[1, 1].legend(loc='upper right', fontsize=7)
     axes[1, 1].grid(True, alpha=0.3)
     
-    # Row 2, Plot 3: Chemical species concentrations (O2, H2S, SO4)
-    axes[1, 2].scatter(m_raw['H2S'] * 1000, m_raw['depth'], label='H₂S (μM) ×1000', color='none', edgecolors='green', s=25, marker='X')
-    axes[1, 2].scatter(m_raw['SO4'] * 10, m_raw['depth'], label='SO₄ (μM) ×10', color='none', edgecolors='lightseagreen', s=25, marker='X')
-    axes[1, 2].scatter(m_raw['O2'], m_raw['depth'], label='O₂ (μM)', color='none', edgecolors='chocolate', s=25, marker='P')
+    # Row 2, Plot 3: Chemical species concentrations (O2, H2S)
+    # axes[1, 2].scatter(raw['H2S'] * 1000, raw['depth'], label='H₂S (μM) ×1000', color='none', edgecolors='green', s=25, marker='X') # MATANO
+    axes[1, 2].scatter(raw['H2S'], raw['depth'], label='H₂S (μM)', color='none', edgecolors='green', s=25, marker='X')
+    axes[1, 2].scatter(raw['O2'], raw['depth'], label='O₂ (μM)', color='none', edgecolors='lightseagreen', s=25, marker='P')
     axes[1, 2].invert_yaxis()
-    axes[1, 2].set_xlim(0, 400)
+    # axes[1, 2].set_xlim(0, 400) # MATANO
+    axes[1, 2].set_xlim(0, 800)
     axes[1, 2].set_ylim(max_graphing_depth, 0)
     axes[1, 2].set_title('Chemical Species', fontsize=13, fontweight='bold')
     axes[1, 2].set_xlabel('Concentration (μM)', fontsize=10)
