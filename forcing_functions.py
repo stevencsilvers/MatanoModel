@@ -65,6 +65,8 @@ def Monod_nitrogen(NO3, NH4, R_no3, R_a):
     Forcing function for nitrogen limitation based on concentrations of NO3 and NH4.
     From Matano Paper
 
+    Works with scalars or arrays.
+
     Parameters
     ----------
     NO3 : float
@@ -76,9 +78,21 @@ def Monod_nitrogen(NO3, NH4, R_no3, R_a):
     R_a : float
         Monod half-saturation constant for NH4 uptake (μM)
     """
-    beta_NO3 = NO3 / (R_no3 + NO3)
-    beta_a = NH4 / (R_a + NH4)
-    return beta_NO3 + beta_a
+
+    # If there is only one of NO3 or NH4 as NaN, treat it as zero
+    # to still show that there is some nitrogen availability
+    NO3_safe = np.nan_to_num(NO3, nan=0.0)
+    NH4_safe = np.nan_to_num(NH4, nan=0.0)
+    
+    beta_NO3 = NO3_safe / (R_no3 + NO3_safe)
+    beta_a = NH4_safe / (R_a + NH4_safe)
+    result = beta_NO3 + beta_a
+    
+    # For cases where both are NaN, set result to NaN
+    both_nan = np.isnan(NO3) & np.isnan(NH4)
+    result = np.where(both_nan, np.nan, result)
+    
+    return result
 
 
 def Monod(resp, S, k_S):
@@ -106,6 +120,8 @@ def light_opnf(resp, I, I_opt):
     Forcing function for light limitation in nitrogen-fixing oxygenic phototrophs.
     Matano paper page 41, equation 3
 
+    Works with scalars or arrays.
+
     Parameters
     ----------
     resp : NoneType
@@ -115,9 +131,8 @@ def light_opnf(resp, I, I_opt):
     I_opt : float
         Optimal irradiance (µmol photons m⁻² s⁻¹)
     """
-    if I == 0:
-        return 0.0
-    return (I_opt / I) * np.exp(1 - (I_opt / I))
+    
+    return np.where(I == 0, 0.0, (I_opt / I) * np.exp(1 - (I_opt / I)))
 
 
 def inhibition(resp, S, a_inh, S_inh):

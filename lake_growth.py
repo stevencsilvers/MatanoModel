@@ -317,50 +317,41 @@ def calculate_depth_profiles(lake, data, R, rxn):
 def calculate_forcing_factors(lake, data, organisms):
     F = {}
 
-    NO3_no_nan = np.nan_to_num(data['NO3'], nan=0.0)
-    NH4_no_nan = np.nan_to_num(data['NH4'], nan=0.0) 
-
-    # Non-nitrogen-fixing oxygenic phototrophs
+    # Non-nitrogen-fixing oxygenic phototrophs (OPNNF)
     if 'opnnf' in organisms:
         F['opnnf'] = {
             'I': [Monod(None, data['par'], k_l_opnnf), 'orange'], # Irradiance forcing factor (F_I)
-            'N': [Monod_nitrogen(NO3_no_nan, NH4_no_nan, R_no3, R_a), 'blue'], # Nitrogen forcing factor (β_t)
+            'N': [Monod_nitrogen(data['NO3'], data['NH4'], R_no3, R_a), 'blue'], # Nitrogen forcing factor (β_t)
             'P': [Monod(None, data['P'], k_p_opnnf), 'green'], # Phosphorus forcing factor (F_P)
             'H2S_inh': [inhibition(None, np.nan_to_num(data['H2S'], nan=0.0), a_inh, H2S_inh), 'mediumorchid'] # Sulfur inhibition forcing factor (F_S)'
         }
-        F['opnnf']['N'][0][np.isnan(data['NO3']) & np.isnan(data['NH4'])] = np.nan  # hide depths with no N data at all
     
-    # Nitrogen-fixing oxygenic phototrophs
+    # Nitrogen-fixing oxygenic phototrophs (OPNF)
     if 'opnf' in organisms:
-        F_I_opnf = []
-        for I in data['par']:
-            F_I_opnf.append(light_opnf(None, I, I_opt))
-        
         F['opnf'] = {
-            'I': [F_I_opnf, 'orange'], # Irradiance forcing factor (F_I)
+            'I': [light_opnf(None, data['par'], I_opt), 'orange'], # Irradiance forcing factor (F_I)
             'P': [Monod(None, data['P'], k_p_opnf), 'green'], # Phosphorus forcing factor (F_P)
             'O2_inh': [inhibition(None, np.nan_to_num(data['O2'], nan=0.0), a_inh, O2_inh), 'red'] # Oxygen inhibition forcing factor (F_O2)'
         }
     
-    # Green sulfur bacteria
+    # Green sulfur bacteria (GSB)
     if 'gsb' in organisms:
         F['gsb'] = {
             'I': [Monod(None, data['par'], k_l_gsb), 'orange'], # Irradiance forcing factor
-            'N': [Monod_nitrogen(NO3_no_nan, NH4_no_nan, R_no3, R_a), 'blue'], # Nitrogen forcing factor (β_t)
+            'N': [Monod_nitrogen(data['NO3'], data['NH4'], R_no3, R_a), 'blue'], # Nitrogen forcing factor (β_t)
             'P': [Monod(None, data['P'], k_p_gsb), 'green'], # Phosphorus forcing factor
             'H2S': [Monod(None, data['H2S'], k_h2s_gsb), 'mediumorchid'], # Sulfide forcing factor
             'O2_inh': [inhibition(None, np.nan_to_num(data['O2'], nan=0.0), a_inh, O2_inh), 'red'] # Oxygen inhibition forcing factor (F_O2)'
         }
-        F['gsb']['N'][0][np.isnan(data['NO3']) & np.isnan(data['NH4'])] = np.nan  # hide depths with no N data at all
     
+    # Purple sulfur bacteria (PSB)
     if 'psb' in organisms:
         F['psb'] = {
             'I': [Monod(None, data['par'], k_l_psb), 'orange'], # Irradiance forcing factor
-            'N': [Monod_nitrogen(NO3_no_nan, NH4_no_nan, R_no3, R_a), 'blue'], # Nitrogen forcing factor (β_t)
+            'N': [Monod_nitrogen(data['NO3'], data['NH4'], R_no3, R_a), 'blue'], # Nitrogen forcing factor (β_t)
             'P': [Monod(None, data['P'], k_p_psb), 'green'], # Phosphorus forcing factor
             'H2S': [Haldane(None, data['H2S'], K_s_psb, K_i_psb), 'mediumorchid']
         }
-        F['psb']['N'][0][np.isnan(data['NO3']) & np.isnan(data['NH4'])] = np.nan  # hide depths with no N data at all
     
     return F
 
@@ -370,7 +361,7 @@ def main():
     
     lake = LAKES['matano']
 
-    organisms = ['opnnf', 'opnf', 'gsb']#, 'psb']
+    organisms = ['opnnf', 'opnf', 'gsb', 'psb']
     
     
     print("Loading Lake data...")
@@ -389,8 +380,6 @@ def main():
 
 
     F = calculate_forcing_factors(lake, data, organisms)
-
-
     prod = calculate_depth_profiles(lake, data, R, rxn)
     
     # Plot results
@@ -445,9 +434,6 @@ def main():
     axes[0, 3].tick_params(axis='both', labelsize=8)
     axes[0, 3].grid(True, alpha=0.3)
 
-    # Row 2, Plot 4: (Hide)
-    axes[1, 3].axis('off')
-
     for i in range(4):
         if i < len(organisms):
             for key in F[organisms[i]]:
@@ -462,54 +448,6 @@ def main():
             axes[1, i].grid(True, alpha=0.3)
         else:
             axes[1, i].axis('off')
-
-    '''
-    # Row 1, Plot 2: OPNNF Forcing factors
-    axes[0, 1].plot(F['opnnf']['I'], data['depth'], label='F_I (irradiance)', linewidth=1, color='orange')
-    axes[0, 1].plot(F['opnnf']['N'], data['depth'], label='β_t (nitrogen availability)', linewidth=1, color='blue')
-    axes[0, 1].plot(F['opnnf']['P'], data['depth'], label='F_P (phosphorus availability)', linewidth=1, color='green')
-    axes[0, 1].plot(F['opnnf']['H2S_inh'], data['depth'], label='F_S (sulfur inhibition)', linewidth=1, color='red')
-    axes[0, 1].invert_yaxis()
-    axes[0, 1].set_xlim(-0.03, 1.03)
-    axes[0, 1].set_ylim(lake.max_graphing_depth, 0)
-    axes[0, 1].set_xlabel('Forcing Factor', fontsize=10)
-    axes[0, 1].tick_params(axis='both', labelsize=8)
-    axes[0, 1].set_title('OPNNF Forcing Factors', fontsize=13, fontweight='bold')
-    axes[0, 1].legend(loc='lower left', fontsize=7)
-    axes[0, 1].grid(True, alpha=0.3)
-
-    # Row 1, Plot 3: GSB Forcing factors
-    axes[0, 2].plot(F['gsb']['I'], data['depth'], label='F_I (irradiance)', linewidth=1, color='orange')
-    axes[0, 2].plot(F['gsb']['N'], data['depth'], label='β_t (total nitrogen availability)', linewidth=1, color='blue')
-    axes[0, 2].plot(F['gsb']['P'], data['depth'], label='F_P (total phosphorus availability)', linewidth=1, color='green')
-    if 'gsb' in organisms:
-        axes[0, 2].plot(F['gsb']['O2_inh'], data['depth'], label='F_O2 (O2 inhibition)', linewidth=1, color='red')
-        axes[0, 2].plot(F['gsb']['H2S'], data['depth'], label='F_H2S (total sulfur availability)', linewidth=1, color='purple')
-    else:
-        axes[0, 2].plot(F['psb']['H2S'], data['depth'], label='F_H2S (sulfur limitation + inhibition)', linewidth=1, color='purple')
-
-    axes[0, 2].invert_yaxis()
-    axes[0, 2].set_xlim(-0.03, 1.03)
-    axes[0, 2].set_ylim(lake.max_graphing_depth, 0)
-    axes[0, 2].set_xlabel('Forcing Factor', fontsize=10)
-    axes[0, 2].set_title(f'{"GSB" if "gsb" in organisms else "PSB"} Forcing Factors', fontsize=13, fontweight='bold')
-    axes[0, 2].tick_params(axis='both', labelsize=8)
-    axes[0, 2].legend(loc='lower right', fontsize=6)
-    axes[0, 2].grid(True, alpha=0.3)
-
-    # Row 1, Plot 4: OPNF Forcing factors
-    axes[0, 3].plot(F['opnf']['I'], data['depth'], label='F_I (irradiance)', linewidth=1, color='orange')
-    axes[0, 3].plot(F['opnf']['P'], data['depth'], label='F_P (total phosphorus availability)', linewidth=1, color='green')
-    axes[0, 3].plot(F['opnf']['O2_inh'], data['depth'], label='F_O2 (O2 inhibition)', linewidth=1, color='red')
-    axes[0, 3].invert_yaxis()
-    axes[0, 3].set_xlim(-0.03, 1.03)
-    axes[0, 3].set_ylim(lake.max_graphing_depth, 0)
-    axes[0, 3].set_xlabel('Forcing Factor', fontsize=10)
-    axes[0, 3].set_title('OPNF Forcing Factors', fontsize=13, fontweight='bold')
-    axes[0, 3].tick_params(axis='both', labelsize=8)
-    axes[0, 3].legend(loc='lower right', fontsize=6)
-    axes[0, 3].grid(True, alpha=0.3)
-    '''
     
     fig.suptitle(f'Predicted Primary Production in Lake {lake.name.capitalize()}', fontsize=15, fontweight='bold')
     plt.tight_layout()
