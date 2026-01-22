@@ -717,7 +717,7 @@ def main():
     cadagno_params = {
         'NH4': (1999, 'august'),
         'NO3': (1999, 'august'),
-        'P': (19991, 'august'),
+        'P': (1999, 'august'),
         'par': (1999, 'august'),
         'temp': (1999, 'august'),
         'H2S': (1999, ''),
@@ -727,7 +727,7 @@ def main():
     # cadagno_params = {
     #     'NH4': (1999, 'september'),
     #     'NO3': (1999, 'september'),
-    #     'P': (19991, 'september'),
+    #     'P': (1999, 'september'),
     #     'par': (1999, 'september'),
     #     'temp': (1999, 'september'),
     #     'H2S': (1999, ''),
@@ -800,7 +800,6 @@ def main():
     # Modified constants for PSB
     k_l_psb = 20.0 # 1.0 -> 5-20
     # k_h2s_psb = 10.0 # 2.0 -> 10-50
-    O2_inh = 100.0 # 1.0 -> 2-10
 
     K_s = 10 # Half-saturation constant for H2S uptake in PSB Chromatium weissei (μM)
     K_i = 700 # Inhibition constant for H2S in PSB Chromatium weissei (μM)
@@ -834,9 +833,6 @@ def main():
 
     # Phosphorus forcing factor
     F_P_psb = Monod(None, data['P'], k_p_psb)
-
-    # Sulfur forcing factor
-    F_H2S_psb = Monod(None, data['H2S'], k_h2s_psb)
 
     # Sulfur inhibition forcing factor
     F_H2S_inh_psb = sulfide_inh_psb(None, np.nan_to_num(data['H2S'], nan=0.0), K_s, K_i)
@@ -989,14 +985,14 @@ def main():
     # Row 2, Plot 4: (Hide)
     axes[1, 3].axis('off')
     
-    fig.suptitle('Predicted Primary Production in Lake Matano', fontsize=15, fontweight='bold')
+    fig.suptitle('Predicted Primary Production in Lake Cadagno', fontsize=15, fontweight='bold')
     plt.tight_layout()
 
-    filename = get_incremented_filename('matano_phototroph_growth', '.png')
+    filename = get_incremented_filename('cadagno_phototroph_growth', '.png')
 
 
     # Command line argument "--save" to save the plot instead of displaying it
-    parser = argparse.ArgumentParser(description='Generate Lake Matano phototroph growth plots')
+    parser = argparse.ArgumentParser(description='Generate Lake Cadagno phototroph growth plots')
     parser.add_argument('--save', action='store_true', help='Save plot to file instead of displaying')
     args = parser.parse_args()
 
