@@ -280,7 +280,6 @@ def initial_conditions(R, comp={}):
     return R, rxn
 
 
-
 def get_phototroph_rate(_phototroph, stepsize=600):
     """
     Returns growth rate of a horde using defined time step.
@@ -400,7 +399,7 @@ def calculate_scaling_factors(*species_arrays):
     
     Finds the species with the highest maximum concentration, then calculates scaling
     factors (as powers of 10) for the others to match it.
-    
+
     Returns
     -------
     scaling_factors : list of float
