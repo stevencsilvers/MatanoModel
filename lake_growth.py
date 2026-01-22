@@ -40,6 +40,7 @@ class LakeConfig:
     max_depth: float
     vertical_resolution: float
     max_graphing_depth: float
+    organisms: List[str]
 
 
 LAKES = {
@@ -57,6 +58,7 @@ LAKES = {
         max_depth=550,
         vertical_resolution=1.0,
         max_graphing_depth=200,
+        organisms = ['opnnf', 'gsb', 'opnf']
     ),
     'cadagno': LakeConfig(
         name='cadagno',
@@ -72,6 +74,7 @@ LAKES = {
         max_depth=20,
         vertical_resolution=0.1,
         max_graphing_depth=20,
+        organisms = ['opnnf', 'psb', 'opnf']
     )
 }
 
@@ -91,8 +94,8 @@ mgr = Pm * CChl_to_Cbm / 3600  # growth rate in /s
 
 # Values from Matano paper
 mu_max_opnnf = 0.67 / 86400  # Maximum growth rate for non-nitrogen fixing oxygenic phototrophs (/s)
-mu_max_gsb = 0.25 / 86400  # Maximum growth rate for green sulfur bacteria (/s)
 mu_max_opnf = 0.23 / 86400  # Maximum growth rate for nitrogen-fixing oxygenic phototrophs (/s)
+mu_max_gsb = 0.25 / 86400  # Maximum growth rate for green sulfur bacteria (/s)
 
 R_no3 = 2.5  # Half-saturation constant for NO3 (μM)
 R_a = 2.5  # Half-saturation constant for NH4+ (μM)
@@ -111,6 +114,8 @@ I_opt = 200 # Optimal irradiance for nitrogen-fixing oxygenic phototrophs (μmol
 k_p_opnf = 0.05 # Phosphorus limitation for nitrogen-fixing oxygenic phototrophs (μM)
 
 # From Gemerden 1974 - PSB
+mu_max_psb = 0.05 / 3600 # Maximum growth rate for PSB Chromatium weissei (/s)
+
 K_s_psb = 10 # Half-saturation constant for H2S uptake in PSB Chromatium weissei (μM)
 K_i_psb = 700 # Inhibition constant for H2S in PSB Chromatium weissei (μM)
 
@@ -274,51 +279,65 @@ def get_phototroph_rate(_phototroph, stepsize=600):
     return _phototroph.growth_rate
 
 
-def calculate_depth_profiles(lake, data, R, rxn):
-    # Calculate phototroph growth rates (where nitrogen data exists)
+def calculate_growth_profiles(lake, data, R, rxn):
+    # Calculate phototroph growth rates
     print("Calculating growth rates...")
 
-    prod = {'opnnf': np.full(len(data['depth']), np.nan),
-            'sb': np.full(len(data['depth']), np.nan),
-            'opnf': np.full(len(data['depth']), np.nan)}
+    prod = {}
+    
+    for org in lake.organisms:
+        prod[org] = {}
+        prod[org]['growth'] = np.full(len(data['depth']), np.nan)
     
     for i in range(len(data['depth'])):
-        # Only calculate if we have at least one nitrogen source
-        if not (np.isnan(data['NO3'][i]) and np.isnan(data['NH4'][i])):
-            # Replace NaN with 0 for calculation
-            NO3_calc = 0 if np.isnan(data['NO3'][i]) else data['NO3'][i]
-            NH4_calc = 0 if np.isnan(data['NH4'][i]) else data['NH4'][i]
-            H2S_calc = 0 if np.isnan(data['H2S'][i]) else data['H2S'][i]
-            
-            # OPNNF
+        # OPNNF
+        if 'opnnf' in lake.organisms:
+            prod['opnnf']['color'] = 'red'
+            prod['opnnf']['label'] = 'Non-Nitrogen-Fixing Oxygenic Phototrophs'
             try:
-                opnnf = get_opnnf(R, rxn, Pm, data['par'][i], k_l_opnnf, alpha, NO3_calc, NH4_calc, data['P'][i], H2S_calc, R_no3, R_a, k_p_opnnf, a_inh, H2S_inh, mmr, mu_max_opnnf * temperature_modifier(data['temp'][i], k_t))
-                prod['opnnf'][i] = get_phototroph_rate(opnnf)
+                opnnf = get_opnnf(R, rxn, Pm, data['par'][i], k_l_opnnf, alpha, data['NO3'][i], data['NH4'][i], data['P'][i], data['H2S'][i], R_no3, R_a, k_p_opnnf, a_inh, H2S_inh, mmr, mu_max_opnnf * temperature_modifier(data['temp'][i], k_t))
+                prod['opnnf']['growth'][i] = get_phototroph_rate(opnnf)
             except:
-                prod['opnnf'][i] = np.nan
-            
-            # GSB
-            try:
-                gsb = get_gsb(R, rxn, Pm, data['par'][i], k_l_gsb, NO3_calc, NH4_calc, data['P'][i], data['O2'][i], H2S_calc, R_no3, R_a, k_p_gsb, k_h2s_gsb, a_inh, O2_inh, mmr, mu_max_gsb * temperature_modifier(data['temp'][i], k_t))
-                prod['sb'][i] = get_phototroph_rate(gsb)
-            except:
-                prod['sb'][i] = np.nan
+                prod['opnnf']['growth'][i] = np.nan
 
-            # OPNF
+        # OPNF
+        if 'opnf' in lake.organisms:
+            prod['opnf']['color'] = 'blue'
+            prod['opnf']['label'] = 'Nitrogen-Fixing Oxygenic Phototrophs'
             try:
                 opnf = get_opnf(R, rxn, Pm, data['par'][i], I_opt, data['P'][i], data['O2'][i], k_p_opnf, a_inh, O2_inh, mmr, mu_max_opnf * temperature_modifier(data['temp'][i], k_t))
-                prod['opnf'][i] = get_phototroph_rate(opnf)
+                prod['opnf']['growth'][i] = get_phototroph_rate(opnf)
             except Exception as e:
-                prod['opnf'][i] = np.nan
+                prod['opnf']['growth'][i] = np.nan
+        
+        # GSB
+        if 'gsb' in lake.organisms:
+            prod['gsb']['color'] = 'green'
+            prod['gsb']['label'] = 'Green Sulfur Bacteria'
+            try:
+                gsb = get_gsb(R, rxn, Pm, data['par'][i], k_l_gsb, data['NO3'][i], data['NH4'][i], data['P'][i], data['O2'][i], data['H2S'][i], R_no3, R_a, k_p_gsb, k_h2s_gsb, a_inh, O2_inh, mmr, mu_max_gsb * temperature_modifier(data['temp'][i], k_t))
+                prod['gsb']['growth'][i] = get_phototroph_rate(gsb)
+            except:
+                prod['gsb']['growth'][i] = np.nan
+        
+        # PSB
+        if 'psb' in lake.organisms:
+            prod['psb']['color'] = 'mediumorchid'
+            prod['psb']['label'] = 'Purple Sulfur Bacteria'
+            try:
+                psb = get_psb(R, rxn, Pm, data['par'][i], k_l_psb, data['NO3'][i], data['NH4'][i], data['P'][i], data['H2S'][i], R_no3, R_a, k_p_psb, K_s_psb, K_i_psb, mmr, mu_max_psb * temperature_modifier(data['temp'][i], k_t))
+                prod['psb']['growth'][i] = get_phototroph_rate(psb)
+            except:
+                prod['psb']['growth'][i] = np.nan
     
     return prod
 
 
-def calculate_forcing_factors(lake, data, organisms):
+def calculate_forcing_factors(lake, data):
     F = {}
 
     # Non-nitrogen-fixing oxygenic phototrophs (OPNNF)
-    if 'opnnf' in organisms:
+    if 'opnnf' in lake.organisms:
         F['opnnf'] = {
             'I': [Monod(None, data['par'], k_l_opnnf), 'orange'], # Irradiance forcing factor (F_I)
             'N': [Monod_nitrogen(data['NO3'], data['NH4'], R_no3, R_a), 'blue'], # Nitrogen forcing factor (β_t)
@@ -327,7 +346,7 @@ def calculate_forcing_factors(lake, data, organisms):
         }
     
     # Nitrogen-fixing oxygenic phototrophs (OPNF)
-    if 'opnf' in organisms:
+    if 'opnf' in lake.organisms:
         F['opnf'] = {
             'I': [light_opnf(None, data['par'], I_opt), 'orange'], # Irradiance forcing factor (F_I)
             'P': [Monod(None, data['P'], k_p_opnf), 'green'], # Phosphorus forcing factor (F_P)
@@ -335,7 +354,7 @@ def calculate_forcing_factors(lake, data, organisms):
         }
     
     # Green sulfur bacteria (GSB)
-    if 'gsb' in organisms:
+    if 'gsb' in lake.organisms:
         F['gsb'] = {
             'I': [Monod(None, data['par'], k_l_gsb), 'orange'], # Irradiance forcing factor
             'N': [Monod_nitrogen(data['NO3'], data['NH4'], R_no3, R_a), 'blue'], # Nitrogen forcing factor (β_t)
@@ -345,7 +364,7 @@ def calculate_forcing_factors(lake, data, organisms):
         }
     
     # Purple sulfur bacteria (PSB)
-    if 'psb' in organisms:
+    if 'psb' in lake.organisms:
         F['psb'] = {
             'I': [Monod(None, data['par'], k_l_psb), 'orange'], # Irradiance forcing factor
             'N': [Monod_nitrogen(data['NO3'], data['NH4'], R_no3, R_a), 'blue'], # Nitrogen forcing factor (β_t)
@@ -358,11 +377,18 @@ def calculate_forcing_factors(lake, data, organisms):
 
 
 def main():
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Generate lake growth plots')
+    parser.add_argument('lake', type=str, help='Lake name (matano or cadagno)')
+    parser.add_argument('--save', action='store_true', help='Save plot to file instead of displaying')
+    args = parser.parse_args()
     
-    lake = LAKES['matano']
-
-    organisms = ['opnnf', 'opnf', 'gsb', 'psb']
+    # Validate lake name
+    if args.lake not in LAKES:
+        print(f"Error: Lake '{args.lake}' not found. Available lakes: {', '.join(LAKES.keys())}")
+        return
     
+    lake = LAKES[args.lake]
     
     print("Loading Lake data...")
     raw = load_lake_data(lake, interpolate=False) # Lake raw data at measured depths
@@ -379,16 +405,15 @@ def main():
     print(r'ΔG =', rxn.molar_gibbs, 'J/mol')
 
 
-    F = calculate_forcing_factors(lake, data, organisms)
-    prod = calculate_depth_profiles(lake, data, R, rxn)
+    F = calculate_forcing_factors(lake, data)
+    prod = calculate_growth_profiles(lake, data, R, rxn)
     
     # Plot results
     fig, axes = plt.subplots(2, 4, figsize=(12, 8))
     
     # Row 1, Plot 1: Growth rate
-    axes[0, 0].plot(prod['opnnf']*1e6, data['depth'], label='Non-Nitrogen-Fixing Oxygenic Phototrophs', color='red', linewidth=1)
-    axes[0, 0].plot(prod['sb']*1e6, data['depth'], label=f'{"Green" if "gsb" in organisms else "Purple"} Sulfur Bacteria', color=f'{"green" if "gsb" in organisms else "purple"}', linewidth=1)
-    axes[0, 0].plot(prod['opnf']*1e6, data['depth'], label='Nitrogen-Fixing Oxygenic Phototrophs', color='blue', linewidth=1)
+    for key in prod:
+        axes[0, 0].plot(prod[key]['growth']*1e6, data['depth'], label=prod[key]['label'], color=prod[key]['color'], linewidth=1)
     axes[0, 0].invert_yaxis()
     axes[0, 0].set_ylim(lake.max_graphing_depth, 0)
     axes[0, 0].set_xlabel('Growth Rate (×10⁶ s⁻¹)', fontsize=10)
@@ -435,15 +460,15 @@ def main():
     axes[0, 3].grid(True, alpha=0.3)
 
     for i in range(4):
-        if i < len(organisms):
-            for key in F[organisms[i]]:
-                axes[1, i].plot(F[organisms[i]][key][0], data['depth'], label=f'F_{key}', linewidth=1, color=F[organisms[i]][key][1])
+        if i < len(lake.organisms):
+            for key in F[lake.organisms[i]]:
+                axes[1, i].plot(F[lake.organisms[i]][key][0], data['depth'], label=f'F_{key}', linewidth=1, color=F[lake.organisms[i]][key][1])
             axes[1, i].invert_yaxis()
             axes[1, i].set_xlim(-0.03, 1.03)
             axes[1, i].set_ylim(lake.max_graphing_depth, 0)
             axes[1, i].set_xlabel('Forcing Factor', fontsize=10)
             axes[1, i].tick_params(axis='both', labelsize=8)
-            axes[1, i].set_title(f'{organisms[i].upper()} Forcing Factors', fontsize=13, fontweight='bold')
+            axes[1, i].set_title(f'{lake.organisms[i].upper()} Forcing Factors', fontsize=13, fontweight='bold')
             axes[1, i].legend(loc='lower right', fontsize=6)
             axes[1, i].grid(True, alpha=0.3)
         else:
@@ -453,11 +478,6 @@ def main():
     plt.tight_layout()
 
     filename = get_incremented_filename(f'{lake.name}_phototroph_growth', '.png', directory='matplotlib')
-
-    # Command line argument "--save" to save the plot instead of displaying it
-    parser = argparse.ArgumentParser(description='Generate lake growth plots')
-    parser.add_argument('--save', action='store_true', help='Save plot to file instead of displaying')
-    args = parser.parse_args()
 
     if args.save:
         plt.savefig(filename, dpi=300, bbox_inches='tight')

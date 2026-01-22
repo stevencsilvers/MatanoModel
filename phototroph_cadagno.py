@@ -887,7 +887,7 @@ def main():
     
     # Row 1, Plot 1: Growth rate
     axes[0, 0].plot(prod_opnnf*1e6, data['depth'], label='Non-Nitrogen-Fixing Oxygenic Phototrophs', color='red', linewidth=1)
-    axes[0, 0].plot(prod_psb*1e6, data['depth'], label='Purple Sulfur Bacteria', color='green', linewidth=1)
+    axes[0, 0].plot(prod_psb*1e6, data['depth'], label='Purple Sulfur Bacteria', color='mediumorchid', linewidth=1)
     axes[0, 0].plot(prod_opnf*1e6, data['depth'], label='Nitrogen-Fixing Oxygenic Phototrophs', color='blue', linewidth=1)
     axes[0, 0].invert_yaxis()
     axes[0, 0].set_ylim(max_graphing_depth, 0)

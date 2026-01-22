@@ -231,7 +231,6 @@ def get_gsb(R, rxn, Pm, I, k_l_gsb, NO3, NH4, P, O2, H2S, R_no3, R_a, k_p_gsb, k
             'max_growth_rate': mgr,
             'CHNOPS_forcing_parameters': {
                 'Phi': (phi_gsb, ['NO3', 'NH4', 'P', 'H2S', 'R_no3', 'R_a', 'k_p_gsb', 'k_h2s_gsb']),
-                # 'Platt': (Platt_tanh, ['alpha', 'Pmax', 'I']),
                 'Light': (Monod, ['I', 'k_l_gsb']),
                 'Oxygen': (inhibition, ['O2', 'a_inh', 'O2_inh'])
             }, 
@@ -249,7 +248,7 @@ def get_gsb(R, rxn, Pm, I, k_l_gsb, NO3, NH4, P, O2, H2S, R_no3, R_a, k_p_gsb, k
     return _phototroph
 
 
-def get_psb(R, rxn, Pm, I, k_l_psb, NO3, NH4, P, H2S, R_no3, R_a, k_p_psb, k_h2s_psb, a_inh, K_s, K_i, mmr, mgr, num=1e6, name='Purple Sulfur Bacterium'):
+def get_psb(R, rxn, Pm, I, k_l_psb, NO3, NH4, P, H2S, R_no3, R_a, k_p_psb, K_s, K_i, mmr, mgr, num=1e6, name='Purple Sulfur Bacterium'):
     """
     Create a NutMEG.horde object representing purple sulfur bacteria.
 
@@ -280,8 +279,7 @@ def get_psb(R, rxn, Pm, I, k_l_psb, NO3, NH4, P, H2S, R_no3, R_a, k_p_psb, k_h2s
         Monod half-saturation constant of NH4 uptake (µM)
     k_p_psb : float
         Monod half-saturation constant of P uptake for purple sulfur bacteria (µM)
-    k_h2s_psb : float
-        Monod half-saturation constant of H2S uptake for purple sulfur bacteria (µM)
+
     K_s : float
         Half-saturation constant for H2S (µM)
     K_i : float
@@ -322,8 +320,7 @@ def get_psb(R, rxn, Pm, I, k_l_psb, NO3, NH4, P, H2S, R_no3, R_a, k_p_psb, k_h2s
                 'Pmax': Pm,
                 'I': I, 'k_l_psb': k_l_psb,
                 'NO3': NO3, 'NH4': NH4, 'P': P, 'H2S': H2S,
-                'R_no3': R_no3, 'R_a': R_a,
-                'k_p_psb': k_p_psb, 'k_h2s_psb': k_h2s_psb,
+                'R_no3': R_no3, 'R_a': R_a, 'k_p_psb': k_p_psb,
                 'K_s': K_s, 'K_i': K_i
             }
         }

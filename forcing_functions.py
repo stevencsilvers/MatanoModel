@@ -131,8 +131,14 @@ def light_opnf(resp, I, I_opt):
     I_opt : float
         Optimal irradiance (µmol photons m⁻² s⁻¹)
     """
-    
-    return np.where(I == 0, 0.0, (I_opt / I) * np.exp(1 - (I_opt / I)))
+
+    # Safe division: where I == 0, return 0 instead of computing
+    with np.errstate(divide='ignore', invalid='ignore'):
+        ratio = np.divide(I_opt, I)
+        result = ratio * np.exp(1 - ratio)
+        # Replace any inf/nan with 0
+        result = np.where(np.isfinite(result), result, 0.0)
+    return result
 
 
 def inhibition(resp, S, a_inh, S_inh):
@@ -149,6 +155,7 @@ def inhibition(resp, S, a_inh, S_inh):
     S_inh : float
         Inhibition constant for the species
     """
+    S = np.where(np.isnan(S), 0.0, S) # If there is no data, assume zero inhibition
     return 0.5 * (1 - np.tanh(a_inh * (S - S_inh)))
 
 
