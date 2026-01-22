@@ -32,6 +32,10 @@ from get_organisms import (
 )
 
 
+# ================================================================================================================================
+# LAKE CONFIGURATION
+# ================================================================================================================================
+
 @dataclass
 class LakeConfig:
     """Configuration for a lake model."""
@@ -79,6 +83,10 @@ LAKES = {
 }
 
 
+# ================================================================================================================================
+# CONSTANTS AND PARAMETERS
+# ================================================================================================================================
+
 # Pm and alpha are platt model properties. The ones identified below are
 # global averages based on the dataset in Bouman et al., (2018).
 Pm = 3.1145  # mg C / mg Chl /h
@@ -92,48 +100,52 @@ Cbm_to_percell = 3e-13 # number of g biomass in 1 cell. Use nutmeg default (Higg
 mmr = Pm * CChl_to_Cbm * Cbm_to_percell / (12*3600)  # mol CO2 / cell / s
 mgr = Pm * CChl_to_Cbm / 3600  # growth rate in /s
 
-# Values from Matano paper
+# Values from Kanke et al. "Modeling the biogeochemical cycles in Lake Matano, a modern analog for ancient ferruginous oceans"
 mu_max_opnnf = 0.67 / 86400  # Maximum growth rate for non-nitrogen fixing oxygenic phototrophs (/s)
 mu_max_opnf = 0.23 / 86400  # Maximum growth rate for nitrogen-fixing oxygenic phototrophs (/s)
 mu_max_gsb = 0.25 / 86400  # Maximum growth rate for green sulfur bacteria (/s)
 
 R_no3 = 2.5  # Half-saturation constant for NO3 (μM)
 R_a = 2.5  # Half-saturation constant for NH4+ (μM)
-k_p_opnnf = 0.014 # Half-saturation constant for P in non-nitrogen fixing oxygenic phototrophs (μM)
+k_p_opnnf = 0.014 # Half-saturation constant for P in non-nitrogen-fixing oxygenic phototrophs (μM)
 k_t = 0.0693 # Temperature dependence (°C^-1)
 a_inh = 1e9 # Inhibition constant μM^-1 (converted from 1e6 mM^-1)
 H2S_inh = 1.0  # Inhibition constant for H2S (μM)
-k_l_opnnf = 100.0 # Light limitation constant for non-nitrogen fixing oxygenic phototrophs (μmol photons m⁻²) <- check units
+k_l_opnnf = 100.0 # Light limitation constant for non-nitrogen fixing oxygenic phototrophs (μmol photons m⁻² s⁻¹)
 
 k_p_gsb = 1.6 # Phosphorus limitation for green sulfur bacteria (μM)
 k_h2s_gsb = 2.0 # Sulfide limitation for green sulfur bacteria (μM)
+k_l_gsb = 1.0 # Light limitation constant for green sulfur bacteria (μmol photons m⁻² s⁻¹)
 O2_inh = 1.0 # Inhibition constant for O2 (μM)
-k_l_gsb = 1.0 # Light limitation constant for green sulfur bacteria (μmol photons m⁻²) <- check units
 
-I_opt = 200 # Optimal irradiance for nitrogen-fixing oxygenic phototrophs (μmol photons m⁻²) <- check units
+I_opt = 200 # Optimal irradiance for nitrogen-fixing oxygenic phototrophs (μmol photons m⁻² s⁻¹)
 k_p_opnf = 0.05 # Phosphorus limitation for nitrogen-fixing oxygenic phototrophs (μM)
 
-# From Gemerden 1974 - PSB
-mu_max_psb = 0.05 / 3600 # Maximum growth rate for PSB Chromatium weissei (/s)
+# Values from Gemerden 1974 for purple sulfur bacteria Chromatium weissei
+mu_max_psb = 0.05 / 3600 # Maximum growth rate for PSB (/s)
 
-K_s_psb = 10 # Half-saturation constant for H2S uptake in PSB Chromatium weissei (μM)
-K_i_psb = 700 # Inhibition constant for H2S in PSB Chromatium weissei (μM)
+K_s_psb = 10 # Half-saturation constant for H2S uptake in PSB (μM)
+K_i_psb = 700 # Inhibition constant for H2S in PSB (μM)
 
 k_p_psb = 1.6 # From GSB
-k_l_psb = 20.0 # ARBITRARY VALUE Light limitation constant for purple sulfur bacteria (μmol photons m⁻²) <- check units
+k_l_psb = 20.0 # (Arbitrary value) Light limitation constant for purple sulfur bacteria (μmol photons m⁻² s⁻¹)
 
+
+# ================================================================================================================================
+# FUNCTIONS
+# ================================================================================================================================
 
 def load_lake_data(lake, interpolate=False):
     """
-    Load Lake Lake data from Google Sheets in long format.
+    Load lake data from csv in long format.
 
     Parameters
     ----------
     lake : LakeConfig
         Configuration object for the lake model containing parameters, max depth, and resolution.
     interpolate : bool, optional
-        If True, interpolate data to a 1 m grid from 0 to max_depth m.
-        If False, return data on 0-max_depth m grid with NaN for unmeasured depths.
+        If True, interpolate data to a grid from 0 to max depth, with specified vertical resolution.
+        If False, return data on 0 to max depth grid with NaN for unmeasured depths.
 
     Returns
     -------
@@ -280,7 +292,10 @@ def get_phototroph_rate(_phototroph, stepsize=600):
 
 
 def calculate_growth_profiles(lake, data, R, rxn):
-    # Calculate phototroph growth rates
+    """
+    Calculate growth profiles for each organism in the lake by depth.
+    Returns dictionary where each key corresponds to an organism, each containing growth curve, color, and label.
+    """
     print("Calculating growth rates...")
 
     prod = {}
@@ -334,6 +349,9 @@ def calculate_growth_profiles(lake, data, R, rxn):
 
 
 def calculate_forcing_factors(lake, data):
+    """
+    Calculate forcing factors for each organism in the lake by depth, for plotting purposes only.
+    """
     F = {}
 
     # Non-nitrogen-fixing oxygenic phototrophs (OPNNF)
@@ -375,40 +393,85 @@ def calculate_forcing_factors(lake, data):
     return F
 
 
-
-def main():
-    # Parse command line arguments
-    parser = argparse.ArgumentParser(description='Generate lake growth plots')
-    parser.add_argument('lake', type=str, help='Lake name (matano or cadagno)')
-    parser.add_argument('--save', action='store_true', help='Save plot to file instead of displaying')
-    args = parser.parse_args()
+def calculate_scaling_factors(*species_arrays):
+    """
+    Determine optimal power-of-10 scaling factors for multiple chemical species arrays
+    so they display on comparable scales.
     
-    # Validate lake name
-    if args.lake not in LAKES:
-        print(f"Error: Lake '{args.lake}' not found. Available lakes: {', '.join(LAKES.keys())}")
-        return
+    Finds the species with the highest maximum concentration, then calculates scaling
+    factors (as powers of 10) for the others to match it.
     
-    lake = LAKES[args.lake]
+    Returns
+    -------
+    scaling_factors : list of float
+        List of scaling multipliers (1, 10, 100, 1000, etc.) matching input order.
+        The species with the highest max concentration will have a multiplier of 1.
+    """
+    if len(species_arrays) < 2 or len(species_arrays) > 3:
+        raise ValueError("Function accepts 2 or 3 species arrays")
     
-    print("Loading Lake data...")
-    raw = load_lake_data(lake, interpolate=False) # Lake raw data at measured depths
-
-    if raw == {}: # Quit if load_lake_data can't load all parameters
-        return
-
-    data = load_lake_data(lake, interpolate=True) # Lake data interpolated to grid of specified resolution
-
-    # Set up reactor
-    R = nm.reactor('Lake_reactor', workoutID=False, pH=7.0)
-    R, rxn = initial_conditions(R)
-    rxn.update_molar_gibbs_from_quotient()
-    print(r'ΔG =', rxn.molar_gibbs, 'J/mol')
-
-
-    F = calculate_forcing_factors(lake, data)
-    prod = calculate_growth_profiles(lake, data, R, rxn)
+    # Get max value for each species (ignoring NaN)
+    max_values = [np.nanmax(arr) for arr in species_arrays]
     
-    # Plot results
+    # Handle edge cases (all NaN or zero)
+    if all(np.isnan(mv) or mv == 0 for mv in max_values):
+        return [1.0] * len(species_arrays)
+    
+    # Find the species with the highest concentration
+    reference_max = max(mv for mv in max_values if not np.isnan(mv) and mv != 0)
+    
+    scaling_factors = []
+    for max_val in max_values:
+        if np.isnan(max_val) or max_val == 0:
+            # If this species has no data, don't scale it
+            scaling_factors.append(1.0)
+        else:
+            # Calculate how much we need to scale THIS species to match the reference
+            # If max_val is much smaller than reference_max, ratio will be > 1
+            ratio = reference_max / max_val
+            
+            # If already close to 1:1, no scaling needed
+            if 0.3 <= ratio <= 3:
+                scaling_factors.append(1.0)
+            else:
+                # Find the power of 10 that gets us closest to matching the reference
+                power = np.log10(ratio)
+                power_rounded = round(power)
+                multiplier = 10.0 ** power_rounded
+                # Ensure we only scale UP (never below 1)
+                scaling_factors.append(max(1.0, multiplier))
+    
+    return scaling_factors
+
+
+def format_scale_label(scale_factor):
+    """
+    Format a scale factor for use in plot labels.
+    """
+    if scale_factor == 1:
+        return ""
+    else:
+        return f" ×{int(scale_factor)}"
+
+
+def generate_plots(lake, data, raw, prod, F):
+    """
+    Generates matplotlib plots for phototroph growth rates, chemical species,
+    light extinction, and forcing factors.
+
+    Parameters
+    ----------
+    lake : LakeConfig
+        Configuration object for the lake model.
+    data : dict
+        Dictionary containing interpolated lake data.
+    raw : dict
+        Dictionary containing raw lake data.
+    prod : dict
+        Dictionary containing phototroph growth rates with depth, as well as colors and labels.
+    F : dict
+        Dictionary containing forcing factors with depth for each organism.
+    """
     fig, axes = plt.subplots(2, 4, figsize=(12, 8))
     
     # Row 1, Plot 1: Growth rate
@@ -424,11 +487,12 @@ def main():
     axes[0, 0].grid(True, alpha=0.3)
 
     # Row 1, Plot 2: Chemical species concentrations (NO3, NH4, P)
-    axes[0, 1].scatter(raw['NO3'] * 100, raw['depth'], label='NO₃⁻ (μM) ×100', color='none', edgecolors='red', s=25, marker='D')
-    axes[0, 1].scatter(raw['NH4'], raw['depth'], label='NH₄⁺ (μM)', color='none', edgecolors='mediumorchid', s=25, marker='o')
-    axes[0, 1].scatter(raw['P'] * 100, raw['depth'], label='P (μM) ×100', color='none', edgecolors='blue', s=25, marker='P')
+    NO3_scale, NH4_scale, P_scale = calculate_scaling_factors(raw['NO3'], raw['NH4'], raw['P'])
+    axes[0, 1].scatter(raw['NO3'] * NO3_scale, raw['depth'], label=f'NO₃⁻ (μM){format_scale_label(NO3_scale)}', color='none', edgecolors='red', s=25, marker='D')
+    axes[0, 1].scatter(raw['NH4'] * NH4_scale, raw['depth'], label=f'NH₄⁺ (μM){format_scale_label(NH4_scale)}', color='none', edgecolors='mediumorchid', s=25, marker='o')
+    axes[0, 1].scatter(raw['P'] * P_scale, raw['depth'], label=f'P (μM){format_scale_label(P_scale)}', color='none', edgecolors='blue', s=25, marker='P')
     axes[0, 1].invert_yaxis()
-    axes[0, 1].set_xlim(0, 650)
+    axes[0, 1].set_xlim(left=0)
     axes[0, 1].set_ylim(lake.max_graphing_depth, 0)
     axes[0, 1].set_title('Chemical Species', fontsize=13, fontweight='bold')
     axes[0, 1].set_xlabel('Concentration (μM)', fontsize=10)
@@ -437,10 +501,11 @@ def main():
     axes[0, 1].grid(True, alpha=0.3)
     
     # Row 1, Plot 3: Chemical species concentrations (O2, H2S)
-    axes[0, 2].scatter(raw['H2S'] * 1000, raw['depth'], label='H₂S (μM) ×1000', color='none', edgecolors='green', s=25, marker='X') # MATANO
-    axes[0, 2].scatter(raw['O2'], raw['depth'], label='O₂ (μM)', color='none', edgecolors='lightseagreen', s=25, marker='P')
+    H2S_scale, O2_scale = calculate_scaling_factors(raw['H2S'], raw['O2'])
+    axes[0, 2].scatter(raw['H2S'] * H2S_scale, raw['depth'], label=f'H₂S (μM){format_scale_label(H2S_scale)}', color='none', edgecolors='green', s=25, marker='X')
+    axes[0, 2].scatter(raw['O2'] * O2_scale, raw['depth'], label=f'O₂ (μM){format_scale_label(O2_scale)}', color='none', edgecolors='lightseagreen', s=25, marker='P')
     axes[0, 2].invert_yaxis()
-    axes[0, 2].set_xlim(0, 400) # MATANO
+    axes[0, 2].set_xlim(left=0)
     axes[0, 2].set_ylim(lake.max_graphing_depth, 0)
     axes[0, 2].set_title('Chemical Species', fontsize=13, fontweight='bold')
     axes[0, 2].set_xlabel('Concentration (μM)', fontsize=10)
@@ -476,6 +541,41 @@ def main():
     
     fig.suptitle(f'Predicted Primary Production in Lake {lake.name.capitalize()}', fontsize=15, fontweight='bold')
     plt.tight_layout()
+
+    return plt
+
+
+def main():
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Generate lake growth plots')
+    parser.add_argument('lake', type=str, help='Lake name (matano or cadagno)')
+    parser.add_argument('--save', action='store_true', help='Save plot to file instead of displaying')
+    args = parser.parse_args()
+    
+    # Validate lake name
+    if args.lake not in LAKES:
+        print(f"Error: Lake '{args.lake}' not found. Available lakes: {', '.join(LAKES.keys())}")
+        return
+    
+    lake = LAKES[args.lake]
+    
+    print("Loading Lake data...")
+    raw = load_lake_data(lake, interpolate=False) # Lake raw data at measured depths
+    if raw == {}: # Quit if load_lake_data can't load all parameters
+        return
+    data = load_lake_data(lake, interpolate=True) # Lake data interpolated to grid of specified resolution
+
+    # Set up reactor
+    R = nm.reactor('Lake_reactor', workoutID=False, pH=7.0)
+    R, rxn = initial_conditions(R)
+    rxn.update_molar_gibbs_from_quotient()
+    print(r'ΔG =', rxn.molar_gibbs, 'J/mol')
+
+    # Dictionaries containing forcing factors and growth profiles with depth for each organism
+    F = calculate_forcing_factors(lake, data)
+    prod = calculate_growth_profiles(lake, data, R, rxn)
+    
+    plot = generate_plots(lake, data, raw, prod, F)
 
     filename = get_incremented_filename(f'{lake.name}_phototroph_growth', '.png', directory='matplotlib')
 
