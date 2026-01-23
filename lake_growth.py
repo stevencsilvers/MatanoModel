@@ -4,6 +4,7 @@ sys.path.append(os.path.dirname(__file__)+'/../NutMEG')
 
 import argparse
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MultipleLocator
 import numpy as np
 import pandas as pd
 import ssl
@@ -482,7 +483,7 @@ def generate_plots(lake, data, raw, prod, F):
     axes[0, 0].set_ylabel('Depth (m)', fontsize=10)
     axes[0, 0].tick_params(axis='both', labelsize=8)
     axes[0, 0].set_title('Phototroph Growth Rate', fontsize=13, fontweight='bold')
-    axes[0, 0].legend(loc='lower right', fontsize=7)
+    axes[0, 0].legend(loc='lower right', fontsize=6)
     axes[0, 0].grid(True, alpha=0.3)
 
     # Row 1, Plot 2: Chemical species concentrations (NO3, NH4, P)
@@ -579,10 +580,10 @@ def main():
     filename = get_incremented_filename(f'{lake.name}_phototroph_growth', '.png', directory='matplotlib')
 
     if args.save:
-        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        plot.savefig(filename, dpi=300, bbox_inches='tight')
         print(f"\nPlot saved as '{filename}'\n")
     else:
-        plt.show()
+        plot.show()
 
 if __name__ == "__main__":
     main()
